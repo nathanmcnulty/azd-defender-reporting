@@ -30,6 +30,23 @@ param webKind string = 'containerapp'
 ])
 param dashboardPackageMode string = 'auto'
 
+@description('Whether the Function App should include Advanced Hunting enrichment by default.')
+param includeAdvancedHunting bool = true
+
+@description('Whether the Function App should reuse existing exports instead of generating fresh exports.')
+param useExistingExportsOnly bool = false
+
+@description('Function App export target.')
+@allowed([
+  'BlobStorage'
+  'SharePoint'
+  'StaticWebApp'
+])
+param exportTarget string = 'BlobStorage'
+
+@description('Whether the Function App should mirror pipeline output into local trace files.')
+param pipelineFileTraceEnabled bool = false
+
 @description('Functions runtime for the Flex Consumption Function App.')
 @allowed([
   'powerShell'
@@ -70,6 +87,9 @@ var containerAppName = 'aca-${take(token, 18)}'
 var resolvedDashboardPackageMode = dashboardPackageMode == 'auto'
   ? (webKind == 'containerapp' ? 'hosted' : 'selfcontained')
   : dashboardPackageMode
+var functionRuntimeDashboardDeliveryMode = resolvedDashboardPackageMode == 'hosted'
+  ? 'Hosted'
+  : (resolvedDashboardPackageMode == 'dual' ? 'Dual' : 'SelfContained')
 
 module storage 'modules/core-storage.bicep' = {
   name: 'storage'
@@ -103,6 +123,11 @@ module functionApp 'modules/compute-functionapp.bicep' = if (computeKind == 'fun
     storageAccountName: storage.outputs.name
     storageBlobEndpoint: storage.outputs.blobEndpoint
     deploymentContainerName: storage.outputs.functionPackageContainerName
+    dashboardDeliveryMode: functionRuntimeDashboardDeliveryMode
+    includeAdvancedHunting: includeAdvancedHunting
+    useExistingExportsOnly: useExistingExportsOnly
+    exportTarget: exportTarget
+    pipelineFileTraceEnabled: pipelineFileTraceEnabled
     applicationInsightsId: monitoring.outputs.applicationInsightsId
     applicationInsightsConnectionString: monitoring.outputs.applicationInsightsConnectionString
     applicationInsightsInstrumentationKey: monitoring.outputs.applicationInsightsInstrumentationKey

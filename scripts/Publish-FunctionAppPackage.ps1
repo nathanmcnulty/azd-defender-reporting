@@ -132,6 +132,11 @@ function Invoke-FunctionAppZipDeploy {
             continue
         }
 
+        if ($attempt -lt $maxAttempts -and $deployText -match 'another deployment is in progress|Deployment was cancelled and another deployment is in progress') {
+            Start-Sleep -Seconds (20 * $attempt)
+            continue
+        }
+
         throw "Function App zip deployment failed for '$FunctionAppName' (attempt $attempt/$maxAttempts)."
     }
 

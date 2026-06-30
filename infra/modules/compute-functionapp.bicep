@@ -5,6 +5,11 @@ param identityName string
 param storageAccountName string
 param storageBlobEndpoint string
 param deploymentContainerName string
+param dashboardDeliveryMode string
+param includeAdvancedHunting bool
+param useExistingExportsOnly bool
+param exportTarget string
+param pipelineFileTraceEnabled bool
 param functionRuntime string
 param functionRuntimeVersion string
 param maximumInstanceCount int
@@ -77,6 +82,13 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       AzureWebJobsStorage__accountName: storageAccountName
       AzureWebJobsStorage__credential: 'managedidentity'
       AzureWebJobsStorage__clientId: userAssignedIdentity.properties.clientId
+      FUNCTIONS_EXTENSION_VERSION: '~4'
+      STORAGE_ACCOUNT_NAME: storageAccountName
+      DASHBOARD_DELIVERY_MODE: dashboardDeliveryMode
+      INCLUDE_ADVANCED_HUNTING: includeAdvancedHunting ? 'true' : 'false'
+      USE_EXISTING_EXPORTS_ONLY: useExistingExportsOnly ? 'true' : 'false'
+      EXPORT_TARGET: exportTarget
+      PIPELINE_FILE_TRACE_ENABLED: pipelineFileTraceEnabled ? 'true' : 'false'
       APPINSIGHTS_INSTRUMENTATIONKEY: applicationInsightsInstrumentationKey
       APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsightsConnectionString
       APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${userAssignedIdentity.properties.clientId};Authorization=AAD'
