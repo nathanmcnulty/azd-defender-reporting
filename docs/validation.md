@@ -12,6 +12,14 @@ It currently validates:
 2. PowerShell syntax for all scripts under `scripts/`
 3. Bicep compilation through `az bicep build --file .\infra\main.bicep`
 
+You can also validate the real upstream Function App package integration when you have a local `defender-reporting` checkout:
+
+```powershell
+.\scripts\Validate-Repository.ps1 `
+    -ValidateFunctionAppPackage `
+    -UpstreamRepositoryPath C:\path\to\defender-reporting
+```
+
 ## Why this is the current validation floor
 
 The repo now owns provisioning shape and wrapper contracts, but it does not yet own the final upstream package deployment contract. That means local validation can already prove:

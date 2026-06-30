@@ -1,7 +1,10 @@
 #Requires -Version 7.0
 
 [CmdletBinding()]
-param()
+param(
+    [string]$UpstreamRepositoryPath,
+    [switch]$ValidateFunctionAppPackage
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -45,5 +48,13 @@ if ($LASTEXITCODE -ne 0) {
     throw 'az bicep build failed.'
 }
 
-Write-Output 'Validation succeeded.'
+if ($ValidateFunctionAppPackage) {
+    Write-Output 'Validating upstream Function App package contract...'
+    $packageOutputPath = Join-Path $repoRoot '.local\validation\function-app-package\defender-reporting-function-app.zip'
+    & (Join-Path $scriptRoot 'Publish-FunctionAppPackage.ps1') `
+        -RepositoryPath $UpstreamRepositoryPath `
+        -OutputPath $packageOutputPath `
+        -BuildOnly | Out-Null
+}
 
+Write-Output 'Validation succeeded.'

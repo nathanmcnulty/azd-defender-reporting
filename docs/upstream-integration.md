@@ -24,7 +24,20 @@ If not set, the wrapper defaults to:
 - It gives local development a clean override path.
 - It makes later CI adoption straightforward because the wrapper can pin a specific ref.
 
-## Current blocker
+## Function App package contract
 
-The wrapper is waiting for the upstream repo to expose a **first-class Function App package build surface** with a stable manifest or output path. Until that lands, the Function App publish script in this repo fails on purpose with a contract error instead of trying to infer internal upstream file layout.
+The wrapper now expects the upstream repo to provide:
 
+- `build\Build-FunctionAppPackage.ps1`
+- a zip package output path
+- a sibling manifest containing at least:
+  - `packagePath`
+  - `packageSha256`
+  - `packageSizeBytes`
+  - `functionAppEntryPointFingerprint`
+  - `sharedHelpersFingerprint`
+  - staged `Az.Accounts` metadata
+
+`Publish-FunctionAppPackage.ps1` resolves the upstream repo, invokes that build script, reads the manifest, validates the package hash and size, and then deploys the zip to the provisioned Function App with Azure CLI.
+
+If the upstream script or manifest contract is missing, the wrapper fails with a clear contract error instead of guessing at internal repo structure.

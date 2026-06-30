@@ -11,13 +11,19 @@ This repo is intentionally **not** a fork of the dashboard application. The upst
 
 ## Current scope
 
-The initial scaffold is meant to be runnable for:
+The current wrapper is meant to be runnable for:
 
 - `azd provision`
 - local structural validation of the wrapper contract
 - mode selection across Function App vs Automation Account and Container App vs no-web
 
-The final **Function App publish** path is intentionally gated on the upcoming upstream first-class package surface. The placeholder publish scripts in this repo fail clearly so the missing upstream contract is obvious instead of being hidden behind ad-hoc probing.
+The **Function App publish** path is now wired to the upstream package contract:
+
+- upstream script: `build\Build-FunctionAppPackage.ps1`
+- default upstream package: `.local\local-reports\function-app-package\defender-reporting-function-app.zip`
+- sibling manifest: `.manifest.json`
+
+The wrapper resolves upstream source, invokes that script, validates the manifest contract, and deploys the resulting zip with Azure CLI. It still fails clearly when the upstream script or manifest contract is missing.
 
 ## Deployment model
 
@@ -80,7 +86,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    azd provision
    ```
 
-At this stage the wrapper provisions the Azure resource matrix and validates the local contracts, but it does **not** yet complete the upstream Function App package deployment. That final publish step is blocked on the upstream package manifest surface.
+At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can build or deploy the upstream Function App package when the upstream repo path or ref is available.
 
 ## Files added by this scaffold
 
@@ -102,5 +108,7 @@ It currently validates:
 - deployment-mode normalization
 - PowerShell script parsing
 - Bicep compilation through `az bicep build`
+
+Optional deeper validation can also exercise the upstream Function App package contract when you point the wrapper at a local `defender-reporting` checkout.
 
 See [docs/validation.md](docs/validation.md) for details.
