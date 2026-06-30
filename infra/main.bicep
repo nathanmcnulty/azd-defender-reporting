@@ -49,9 +49,9 @@ param pipelineFileTraceEnabled bool = false
 
 @description('Functions runtime for the Flex Consumption Function App.')
 @allowed([
-  'powerShell'
+  'powershell'
 ])
-param functionRuntime string = 'powerShell'
+param functionRuntime string = 'powershell'
 
 @description('Functions runtime version for the Flex Consumption Function App.')
 @allowed([
