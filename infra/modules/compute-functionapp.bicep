@@ -80,8 +80,6 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       APPINSIGHTS_INSTRUMENTATIONKEY: applicationInsightsInstrumentationKey
       APPLICATIONINSIGHTS_CONNECTION_STRING: applicationInsightsConnectionString
       APPLICATIONINSIGHTS_AUTHENTICATION_STRING: 'ClientId=${userAssignedIdentity.properties.clientId};Authorization=AAD'
-      FUNCTIONS_WORKER_RUNTIME: 'powershell'
-      SCM_DO_BUILD_DURING_DEPLOYMENT: 'false'
     }
   }
 }
@@ -106,4 +104,3 @@ output name string = functionApp.name
 output hostname string = functionApp.properties.defaultHostName
 output identityPrincipalId string = userAssignedIdentity.properties.principalId
 output identityClientId string = userAssignedIdentity.properties.clientId
-
