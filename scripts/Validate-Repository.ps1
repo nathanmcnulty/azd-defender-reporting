@@ -3,7 +3,8 @@
 [CmdletBinding()]
 param(
     [string]$UpstreamRepositoryPath,
-    [switch]$ValidateFunctionAppPackage
+    [switch]$ValidateFunctionAppPackage,
+    [switch]$ValidateAutomationRunbook
 )
 
 Set-StrictMode -Version Latest
@@ -54,6 +55,13 @@ if ($ValidateFunctionAppPackage) {
     & (Join-Path $scriptRoot 'Publish-FunctionAppPackage.ps1') `
         -RepositoryPath $UpstreamRepositoryPath `
         -OutputPath $packageOutputPath `
+        -BuildOnly | Out-Null
+}
+
+if ($ValidateAutomationRunbook) {
+    Write-Output 'Validating upstream Automation runbook contract...'
+    & (Join-Path $scriptRoot 'Publish-AutomationRunbook.ps1') `
+        -RepositoryPath $UpstreamRepositoryPath `
         -BuildOnly | Out-Null
 }
 

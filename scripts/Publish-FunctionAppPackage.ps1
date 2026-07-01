@@ -384,6 +384,15 @@ if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) {
 
 $releasedPackagePath = Stage-ReleasedPackage -SourcePackagePath $resolvedPackagePath
 $deploymentStorage = Get-FunctionAppDeploymentStorage -ResourceGroupName $ResourceGroupName -FunctionAppName $FunctionAppName
+$templatePublishResult = @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+    -StorageAccountName $deploymentStorage.StorageAccountName `
+    -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
+        $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
+    } | Select-Object -Last 1
+
+if ($null -eq $templatePublishResult) {
+    throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
+}
 $packageUri = Publish-ReleasedPackageBlob `
     -StorageAccountName $deploymentStorage.StorageAccountName `
     -ContainerName $deploymentStorage.ContainerName `
@@ -395,5 +404,6 @@ Invoke-FunctionAppOneDeploy -PackageUri $packageUri -ResourceGroupName $Resource
 
 $result | Add-Member -NotePropertyName ReleasedPackagePath -NotePropertyValue $releasedPackagePath
 $result | Add-Member -NotePropertyName PackageUri -NotePropertyValue ([System.Uri]::new($packageUri).GetLeftPart([System.UriPartial]::Path))
+$result | Add-Member -NotePropertyName TemplatesContainerName -NotePropertyValue $templatePublishResult.ContainerName
 
 $result

@@ -16,6 +16,8 @@ The current wrapper is meant to be runnable for:
 - `azd provision`
 - local structural validation of the wrapper contract
 - mode selection across Function App vs Automation Account and Container App vs no-web
+- compute publish for both Function App and Automation Account
+- hosted Container App validation against the storage-backed dashboard path
 
 The **Function App publish** path is now wired to the upstream package contract:
 
@@ -24,7 +26,21 @@ The **Function App publish** path is now wired to the upstream package contract:
 - validation build output: `.local\validation\function-app-package\defender-reporting-function-app.zip`
 - sibling manifest: `.manifest.json`
 
-The wrapper resolves upstream source, invokes that script, validates the manifest contract, stages the package as `released-package.zip`, uploads it to the Flex deployment container, and invokes the Function App `onedeploy` extension. It still fails clearly when the upstream script or manifest contract is missing.
+The wrapper resolves upstream source, invokes that script, validates the manifest contract, uploads required template assets, stages the package as `released-package.zip`, uploads it to the Flex deployment container, and invokes the Function App `onedeploy` extension. It still fails clearly when the upstream script or manifest contract is missing.
+
+The **Automation Account publish** path is also wired to the upstream runbook contract:
+
+- upstream script: `build\azure\Build-Runbook.ps1`
+- generated runbook artifact: `azure\Invoke-DashboardPipeline.ps1`
+- wrapper publish script: `scripts\Publish-AutomationRunbook.ps1`
+
+The wrapper builds the upstream runbook, uploads template assets, creates or updates the PowerShell 7.4 runtime environment, publishes `Invoke-DashboardPipeline`, sets the required Automation variables, and maintains the daily schedule.
+
+The **hosted web surface** is a blob-backed Container App:
+
+- image default: `docker.io/library/caddy:alpine`
+- wrapper publish script: `scripts\Publish-HostedSurface.ps1`
+- runtime behavior: managed identity reads the `dashboards` container and serves the latest hosted dashboard or a placeholder page
 
 ## Deployment model
 
@@ -87,14 +103,23 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    azd provision
    ```
 
-At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can build or deploy the upstream Function App package when the upstream repo path or ref is available.
+6. Publish the compute or hosted surface you want to exercise.
 
-For Flex Consumption publishing, the signed-in operator also needs blob data access to the Function App deployment storage so the wrapper can upload `released-package.zip` and mint a short-lived read SAS for OneDeploy.
+   ```powershell
+   .\scripts\Publish-FunctionAppPackage.ps1 -ResourceGroupName <rg> -FunctionAppName <func>
+   .\scripts\Publish-AutomationRunbook.ps1 -ResourceGroupName <rg> -AutomationAccountName <account>
+   .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app>
+   ```
+
+At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can publish the upstream Function App, Automation Account, and hosted Container App surfaces when the upstream repo path or ref is available.
+
+For publish operations, the signed-in operator needs blob data access to the wrapper storage account. The wrapper now accepts `DEPLOYER_PRINCIPAL_ID` and `DEPLOYER_PRINCIPAL_TYPE` and will auto-populate them during environment validation when Azure CLI can resolve the signed-in principal.
 
 ## Files added by this scaffold
 
 - `azure.yaml` - azd workflow and hook registration
 - `infra/` - Bicep modules for storage, monitoring, Function App, Automation Account, and Container App
+<<<<<<< HEAD
 - `scripts/` - validation, mode normalization, upstream resolution, and publish orchestration
 - `docs/` - wrapper-specific behavior and operating notes
 
@@ -111,6 +136,8 @@ It currently validates:
 - deployment-mode normalization
 - PowerShell script parsing
 - Bicep compilation through `az bicep build`
+- optional upstream Function App package build-only validation
+- optional upstream Automation runbook build-only validation
 
 Optional deeper validation can also exercise the upstream Function App package contract when you point the wrapper at a local `defender-reporting` checkout.
 

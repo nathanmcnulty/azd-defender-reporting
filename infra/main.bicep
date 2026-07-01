@@ -71,8 +71,14 @@ param maximumInstanceCount int = 100
 ])
 param instanceMemoryMb int = 2048
 
-@description('Placeholder image used by the scaffolded Container App until hosted-surface publish wiring lands.')
-param placeholderContainerImage string = 'mcr.microsoft.com/azuredocs/containerapps-helloworld:latest'
+@description('Container image for the hosted dashboard Container App.')
+param containerAppImage string = 'docker.io/library/caddy:alpine'
+
+@description('Optional Microsoft Entra object ID for the signed-in deployer that should receive storage data-plane access.')
+param deployerPrincipalId string = ''
+
+@description('Microsoft Entra principal type for deployerPrincipalId.')
+param deployerPrincipalType string = 'User'
 
 var token = toLower(uniqueString(subscription().id, resourceGroup().id, environmentName))
 var storageAccountName = 'st${take(token, 22)}'
@@ -172,8 +178,37 @@ module containerApp 'modules/web-containerapp.bicep' = if (webKind == 'container
     containerAppName: containerAppName
     environmentName: containerEnvironmentName
     location: location
-    image: placeholderContainerImage
+    image: containerAppImage
     logAnalyticsWorkspaceName: workspaceName
+    storageAccountName: storage.outputs.name
+    dashboardDeliveryMode: functionRuntimeDashboardDeliveryMode
+  }
+}
+
+module containerAppStorageRoles 'modules/role-assignments.bicep' = if (webKind == 'containerapp') {
+  name: 'containerAppStorageRoles'
+  params: {
+    storageAccountName: storage.outputs.name
+    principalId: containerApp!.outputs.identityPrincipalId
+    assignBlobReader: true
+    assignBlobOwner: false
+    assignBlobContributor: false
+    assignQueueContributor: false
+    assignTableContributor: false
+  }
+}
+
+module deployerStorageRoles 'modules/role-assignments.bicep' = if (!empty(deployerPrincipalId)) {
+  name: 'deployerStorageRoles'
+  params: {
+    storageAccountName: storage.outputs.name
+    principalId: deployerPrincipalId
+    principalType: deployerPrincipalType
+    assignBlobReader: false
+    assignBlobOwner: false
+    assignBlobContributor: true
+    assignQueueContributor: false
+    assignTableContributor: false
   }
 }
 
