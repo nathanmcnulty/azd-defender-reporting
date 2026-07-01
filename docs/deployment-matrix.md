@@ -13,6 +13,5 @@ The wrapper keeps compute and web choices independent so future hosting addition
 
 - `dual` remains valid when you explicitly want both hosted and self-contained outputs.
 - `hosted` is intentionally rejected when `WEB_KIND=none`.
-- Final Function App publish wiring is blocked on the upstream package contract.
+- Function App publish is wired through the upstream package contract and Flex Consumption OneDeploy flow.
 - Publish scripts for Automation and hosted web are placeholders in this scaffold; provisioning is ready, deployment wiring comes next.
-

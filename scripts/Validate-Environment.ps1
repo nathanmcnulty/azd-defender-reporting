@@ -24,7 +24,7 @@ function Set-ProcessAndAzdDefault {
     )
 
     $current = [Environment]::GetEnvironmentVariable($Name, 'Process')
-    if (-not [string]::IsNullOrWhiteSpace($current)) {
+    if (-not [string]::IsNullOrWhiteSpace($current) -or -not $ApplyDefaults) {
         return
     }
 

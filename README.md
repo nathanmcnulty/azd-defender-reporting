@@ -20,7 +20,8 @@ The current wrapper is meant to be runnable for:
 The **Function App publish** path is now wired to the upstream package contract:
 
 - upstream script: `build\Build-FunctionAppPackage.ps1`
-- default upstream package: `.local\local-reports\function-app-package\defender-reporting-function-app.zip`
+- default wrapper build output: `.local\artifacts\function-app-package\defender-reporting-function-app.zip`
+- validation build output: `.local\validation\function-app-package\defender-reporting-function-app.zip`
 - sibling manifest: `.manifest.json`
 
 The wrapper resolves upstream source, invokes that script, validates the manifest contract, stages the package as `released-package.zip`, uploads it to the Flex deployment container, and invokes the Function App `onedeploy` extension. It still fails clearly when the upstream script or manifest contract is missing.
@@ -94,7 +95,7 @@ For Flex Consumption publishing, the signed-in operator also needs blob data acc
 
 - `azure.yaml` - azd workflow and hook registration
 - `infra/` - Bicep modules for storage, monitoring, Function App, Automation Account, and Container App
-- `scripts/` - validation, mode normalization, upstream resolution, and placeholder publish commands
+- `scripts/` - validation, mode normalization, upstream resolution, and publish orchestration
 - `docs/` - wrapper-specific behavior and operating notes
 
 ## Validation

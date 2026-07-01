@@ -234,6 +234,7 @@ resource oneDeploy 'Microsoft.Web/sites/extensions@2022-09-01' = {
   name: '${functionAppName}/onedeploy'
   properties: {
     packageUri: packageUri
+    remoteBuild: false
     type: 'zip'
     async: false
     restart: true
@@ -393,6 +394,6 @@ Write-Output ("Deploying Function App package '{0}' to {1}/{2} with OneDeploy...
 Invoke-FunctionAppOneDeploy -PackageUri $packageUri -ResourceGroupName $ResourceGroupName -FunctionAppName $FunctionAppName
 
 $result | Add-Member -NotePropertyName ReleasedPackagePath -NotePropertyValue $releasedPackagePath
-$result | Add-Member -NotePropertyName PackageUri -NotePropertyValue $packageUri
+$result | Add-Member -NotePropertyName PackageUri -NotePropertyValue ([System.Uri]::new($packageUri).GetLeftPart([System.UriPartial]::Path))
 
 $result
