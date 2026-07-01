@@ -1,0 +1,23 @@
+name: azd-defender-reporting
+metadata:
+  template: nathanmcnulty/azd-defender-reporting@0.1.0-alpha
+infra:
+  provider: bicep
+  path: infra
+hooks:
+  preprovision:
+    shell: pwsh
+    run: ./scripts/Validate-Environment.ps1 -ApplyDefaults -PersistAzdEnv -CommandName preprovision
+    interactive: false
+  postprovision:
+    shell: pwsh
+    run: ./scripts/Validate-Environment.ps1 -CommandName postprovision
+    interactive: false
+  predeploy:
+    shell: pwsh
+    run: ./scripts/Validate-Environment.ps1 -ApplyDefaults -PersistAzdEnv -CommandName predeploy
+    interactive: false
+  postdeploy:
+    shell: pwsh
+    run: ./scripts/Validate-Environment.ps1 -CommandName postdeploy
+    interactive: false
