@@ -1,11 +1,13 @@
 param storageAccountName string
 param principalId string
 param principalType string = 'ServicePrincipal'
+param assignBlobReader bool = false
 param assignBlobOwner bool = false
 param assignBlobContributor bool = true
 param assignQueueContributor bool = false
 param assignTableContributor bool = false
 
+var storageBlobDataReaderRoleId = '2a2b9908-6ea1-4ae2-8e65-a410df84e7d1'
 var storageBlobDataOwnerRoleId = 'b7e6dc6d-f1e8-4753-8033-0f276bb0955b'
 var storageBlobDataContributorRoleId = 'ba92f5b4-2d11-453d-a403-e96b0029c9fe'
 var storageQueueDataContributorRoleId = '974c5e8b-45b9-4653-ba55-5f855dd0fb88'
@@ -20,6 +22,16 @@ resource blobOwnerAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01
   scope: storageAccount
   properties: {
     roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataOwnerRoleId)
+    principalId: principalId
+    principalType: principalType
+  }
+}
+
+resource blobReaderAssignment 'Microsoft.Authorization/roleAssignments@2022-04-01' = if (assignBlobReader) {
+  name: guid(subscription().id, storageAccount.id, principalId, 'Storage Blob Data Reader')
+  scope: storageAccount
+  properties: {
+    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataReaderRoleId)
     principalId: principalId
     principalType: principalType
   }
@@ -54,4 +66,3 @@ resource tableContributorAssignment 'Microsoft.Authorization/roleAssignments@202
     principalType: principalType
   }
 }
-

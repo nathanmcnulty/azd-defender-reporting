@@ -47,11 +47,60 @@ function Set-ProcessAndAzdDefault {
     }
 }
 
+function Set-DeployerPrincipalDefaults {
+    [CmdletBinding()]
+    param()
+
+    if (-not [string]::IsNullOrWhiteSpace([Environment]::GetEnvironmentVariable('DEPLOYER_PRINCIPAL_ID', 'Process'))) {
+        return
+    }
+
+    $azPath = (Get-Command -Name 'az' -ErrorAction SilentlyContinue)?.Source
+    if (-not $azPath) {
+        return
+    }
+
+    try {
+        $principalType = (& $azPath account show --query user.type --output tsv 2>$null | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($principalType)) {
+            $principalType = 'user'
+        }
+
+        if ($principalType -eq 'user') {
+            $principalId = (& $azPath ad signed-in-user show --query id --output tsv 2>$null | Out-String).Trim()
+            if ([string]::IsNullOrWhiteSpace($principalId)) {
+                return
+            }
+
+            Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value $principalId
+            Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_TYPE' -Value 'User'
+            return
+        }
+
+        $servicePrincipalAppId = (& $azPath account show --query user.name --output tsv 2>$null | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($servicePrincipalAppId)) {
+            return
+        }
+
+        $servicePrincipalObjectId = (& $azPath ad sp show --id $servicePrincipalAppId --query id --output tsv 2>$null | Out-String).Trim()
+        if ([string]::IsNullOrWhiteSpace($servicePrincipalObjectId)) {
+            return
+        }
+
+        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value $servicePrincipalObjectId
+        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_TYPE' -Value 'ServicePrincipal'
+    }
+    catch {
+        Write-Verbose "Unable to determine deployer principal defaults. $_"
+    }
+}
+
 Set-ProcessAndAzdDefault -Name 'COMPUTE_KIND' -Value 'functionapp'
 Set-ProcessAndAzdDefault -Name 'WEB_KIND' -Value 'containerapp'
 Set-ProcessAndAzdDefault -Name 'DASHBOARD_PACKAGE_MODE' -Value 'auto'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REPO' -Value 'https://github.com/nathanmcnulty/defender-reporting.git'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value 'main'
+Set-DeployerPrincipalDefaults
 
 $mode = & (Join-Path $scriptRoot 'Get-DeploymentMode.ps1')
 

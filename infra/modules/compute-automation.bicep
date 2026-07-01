@@ -21,4 +21,4 @@ resource automationAccount 'Microsoft.Automation/automationAccounts@2021-06-22' 
 output id string = automationAccount.id
 output name string = automationAccount.name
 output identityPrincipalId string = automationAccount.identity.principalId
-output defaultRunbookName string = 'DashboardPipeline'
+output defaultRunbookName string = 'Invoke-DashboardPipeline'

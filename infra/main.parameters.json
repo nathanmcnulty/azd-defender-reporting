@@ -16,7 +16,12 @@
     },
     "dashboardPackageMode": {
       "value": "${DASHBOARD_PACKAGE_MODE}"
+    },
+    "deployerPrincipalId": {
+      "value": "${DEPLOYER_PRINCIPAL_ID}"
+    },
+    "deployerPrincipalType": {
+      "value": "${DEPLOYER_PRINCIPAL_TYPE}"
     }
   }
 }
-

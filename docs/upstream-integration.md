@@ -41,3 +41,15 @@ The wrapper now expects the upstream repo to provide:
 `Publish-FunctionAppPackage.ps1` resolves the upstream repo, invokes that build script, reads the manifest, validates the package hash and size, stages the build output as `released-package.zip`, uploads it to the provisioned Flex deployment container, and invokes the Function App `onedeploy` extension with a short-lived SAS URL.
 
 If the upstream script or manifest contract is missing, the wrapper fails with a clear contract error instead of guessing at internal repo structure.
+
+## Automation runbook and template contracts
+
+The wrapper also expects the upstream repo to provide:
+
+- `build\azure\Build-Runbook.ps1`
+- generated runbook output at `azure\Invoke-DashboardPipeline.ps1`
+- `azure\Upload-Templates.ps1`
+
+`Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, uploads template assets through the upstream template uploader, and then publishes the generated runbook into the provisioned Automation Account runtime environment.
+
+`Publish-HostedSurface.ps1` reuses the same template-upload contract and then validates that the provisioned Container App host is reachable for hosted dashboard delivery.
