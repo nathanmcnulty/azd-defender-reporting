@@ -38,6 +38,6 @@ The wrapper now expects the upstream repo to provide:
   - `sharedHelpersFingerprint`
   - staged `Az.Accounts` metadata
 
-`Publish-FunctionAppPackage.ps1` resolves the upstream repo, invokes that build script, reads the manifest, validates the package hash and size, and then deploys the zip to the provisioned Function App with Azure CLI.
+`Publish-FunctionAppPackage.ps1` resolves the upstream repo, invokes that build script, reads the manifest, validates the package hash and size, stages the build output as `released-package.zip`, uploads it to the provisioned Flex deployment container, and invokes the Function App `onedeploy` extension with a short-lived SAS URL.
 
 If the upstream script or manifest contract is missing, the wrapper fails with a clear contract error instead of guessing at internal repo structure.

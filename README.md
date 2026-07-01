@@ -23,7 +23,7 @@ The **Function App publish** path is now wired to the upstream package contract:
 - default upstream package: `.local\local-reports\function-app-package\defender-reporting-function-app.zip`
 - sibling manifest: `.manifest.json`
 
-The wrapper resolves upstream source, invokes that script, validates the manifest contract, and deploys the resulting zip with Azure CLI. It still fails clearly when the upstream script or manifest contract is missing.
+The wrapper resolves upstream source, invokes that script, validates the manifest contract, stages the package as `released-package.zip`, uploads it to the Flex deployment container, and invokes the Function App `onedeploy` extension. It still fails clearly when the upstream script or manifest contract is missing.
 
 ## Deployment model
 
@@ -87,6 +87,8 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    ```
 
 At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can build or deploy the upstream Function App package when the upstream repo path or ref is available.
+
+For Flex Consumption publishing, the signed-in operator also needs blob data access to the Function App deployment storage so the wrapper can upload `released-package.zip` and mint a short-lived read SAS for OneDeploy.
 
 ## Files added by this scaffold
 

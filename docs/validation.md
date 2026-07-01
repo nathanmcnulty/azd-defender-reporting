@@ -22,10 +22,10 @@ You can also validate the real upstream Function App package integration when yo
 
 ## Why this is the current validation floor
 
-The repo now owns provisioning shape and wrapper contracts, but it does not yet own the final upstream package deployment contract. That means local validation can already prove:
+The repo now owns the upstream Function App package contract, but local validation still stops short of a live Flex publish. That means local validation can already prove:
 
 - `azure.yaml` hook inputs are normalized
 - the wrapper scripts parse
 - the Bicep matrix compiles
 
-Live publish validation will be added once the upstream Function App package surface lands.
+Optional live publish validation can now exercise the full Flex Consumption publish path once a real Azure environment exists and the signed-in operator has blob data access to the deployment storage container.
