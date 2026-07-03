@@ -41,7 +41,7 @@ The **hosted web surface** is a blob-backed Container App:
 - image default: `docker.io/library/caddy:alpine`
 - wrapper publish scripts: `scripts\Publish-Deployment.ps1` (top-level) and `scripts\Publish-HostedSurface.ps1` (hosted-only)
 - runtime behavior: managed identity reads the `dashboards` container and serves the latest hosted dashboard or a placeholder page
-- default hosted publish behavior: configure Entra ID Easy Auth plus security-group restriction unless you explicitly opt out
+- default hosted publish behavior: configure Entra ID Easy Auth; use a security-group restriction when configured, otherwise allow any authenticated user in the tenant unless you explicitly opt out
 
 ## Deployment model
 
@@ -90,7 +90,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    azd env set COMPUTE_KIND automation
    azd env set WEB_KIND none
    azd env set DEFENDER_REPORTING_REF main
-   azd env set HOSTED_AUTH_SECURITY_GROUP "Dashboard Viewers"
+   azd env set HOSTED_AUTH_SECURITY_GROUP "Dashboard Viewers"  # optional; omit for tenant-wide authenticated-user access
    ```
 
 4. Run the local wrapper validation.
@@ -111,7 +111,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    .\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg>
    ```
 
-   Hosted publish now defaults to the secured Easy Auth path. Set `HOSTED_AUTH_SECURITY_GROUP` (or pass `-SecurityGroup`) so the wrapper can assign the allowed Entra group. If you intentionally want to leave auth management to another process, pass `-SkipAuthSetup` or set `SKIP_HOSTED_AUTH_SETUP=true`. That opt-out skips wrapper auth management and preserves any existing Easy Auth configuration already on the Container App.
+   Hosted publish now defaults to the secured Easy Auth path. If `HOSTED_AUTH_SECURITY_GROUP` (or `-SecurityGroup`) is set, the wrapper restricts access to that Entra group. If it is omitted, the wrapper still configures Easy Auth but allows any authenticated user in the tenant. If you intentionally want to leave auth management to another process, pass `-SkipAuthSetup` or set `SKIP_HOSTED_AUTH_SETUP=true`. That opt-out skips wrapper auth management and preserves any existing Easy Auth configuration already on the Container App.
 
    You can still run the narrower entrypoints directly when needed:
 
@@ -119,6 +119,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    .\scripts\Publish-FunctionAppPackage.ps1 -ResourceGroupName <rg> -FunctionAppName <func>
    .\scripts\Publish-AutomationRunbook.ps1 -ResourceGroupName <rg> -AutomationAccountName <account>
    .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app> -SecurityGroup "Dashboard Viewers"
+   .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app>  # tenant-wide authenticated-user access
    ```
 
 At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can publish the upstream Function App, Automation Account, template assets, and hosted Container App surfaces when the upstream repo path or ref is available.

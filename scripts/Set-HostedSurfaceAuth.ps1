@@ -276,10 +276,12 @@ function Ensure-ServicePrincipalAssignmentRequirement {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$ServicePrincipalObjectId
+        [string]$ServicePrincipalObjectId,
+        [Parameter(Mandatory = $true)]
+        [bool]$Required
     )
 
-    $patchBody = @{ appRoleAssignmentRequired = $true } | ConvertTo-Json
+    $patchBody = @{ appRoleAssignmentRequired = $Required } | ConvertTo-Json
     Invoke-AzRestJson -Method PATCH -Url "$graphApiBaseUrl/v1.0/servicePrincipals/$ServicePrincipalObjectId" -Body $patchBody | Out-Null
 }
 
@@ -406,6 +408,7 @@ $result = [PSCustomObject]@{
     SecurityGroup = if ([string]::IsNullOrWhiteSpace($resolvedSecurityGroup)) { '' } else { $resolvedSecurityGroup }
     SecurityGroupId = ''
     SecurityGroupDisplayName = ''
+    AuthAccessScope = if ($resolvedSkipAuthSetup) { 'ExistingConfiguration' } elseif ([string]::IsNullOrWhiteSpace($resolvedSecurityGroup)) { 'TenantWide' } else { 'SecurityGroupRestricted' }
     AppRegistrationClientId = if ([string]::IsNullOrWhiteSpace($currentAuthState.ClientId)) { '' } else { $currentAuthState.ClientId }
     AuthManagementMode = if ($resolvedSkipAuthSetup) { 'Skipped' } else { 'Managed' }
     ValidationExpectation = if ($resolvedSkipAuthSetup) {
@@ -423,18 +426,20 @@ if ($resolvedSkipAuthSetup) {
 }
 
 if ([string]::IsNullOrWhiteSpace($resolvedSecurityGroup)) {
+    Write-Warning 'HOSTED_AUTH_SECURITY_GROUP was not provided. Hosted Easy Auth will be configured for tenant-wide authenticated-user access instead of security-group restriction.'
+
     if ($PlanOnly) {
-        $result.ReadyToApply = $false
         $result
         return
     }
-
-    throw "Hosted publish defaults to Easy Auth. Set HOSTED_AUTH_SECURITY_GROUP or pass -SecurityGroup, or opt out with -SkipAuthSetup."
 }
 
-$securityGroupDefinition = Resolve-SecurityGroupDefinition -Group $resolvedSecurityGroup
-$result.SecurityGroupId = $securityGroupDefinition.Id
-$result.SecurityGroupDisplayName = $securityGroupDefinition.DisplayName
+$securityGroupDefinition = $null
+if (-not [string]::IsNullOrWhiteSpace($resolvedSecurityGroup)) {
+    $securityGroupDefinition = Resolve-SecurityGroupDefinition -Group $resolvedSecurityGroup
+    $result.SecurityGroupId = $securityGroupDefinition.Id
+    $result.SecurityGroupDisplayName = $securityGroupDefinition.DisplayName
+}
 
 if ($PlanOnly) {
     $result
@@ -444,8 +449,10 @@ if ($PlanOnly) {
 $application = Ensure-ApplicationRegistration -DisplayName $resolvedAppRegistrationDisplayName -RedirectUri $redirectUri
 $servicePrincipal = Ensure-ServicePrincipal -AppClientId ([string]$application.appId)
 Ensure-DelegatedPermissionGrant -ServicePrincipalObjectId ([string]$servicePrincipal.id) -AppClientId ([string]$application.appId)
-Ensure-ServicePrincipalAssignmentRequirement -ServicePrincipalObjectId ([string]$servicePrincipal.id)
-Ensure-SecurityGroupAssignment -ServicePrincipalObjectId ([string]$servicePrincipal.id) -SecurityGroupId $securityGroupDefinition.Id
+Ensure-ServicePrincipalAssignmentRequirement -ServicePrincipalObjectId ([string]$servicePrincipal.id) -Required ($null -ne $securityGroupDefinition)
+if ($null -ne $securityGroupDefinition) {
+    Ensure-SecurityGroupAssignment -ServicePrincipalObjectId ([string]$servicePrincipal.id) -SecurityGroupId $securityGroupDefinition.Id
+}
 
 $authConfigPayload = @{
     properties = @{

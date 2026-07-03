@@ -163,7 +163,7 @@ Write-Output "  az: $(if ($azPath) { $azPath } else { '<missing>' })"
 
 $shouldWarnAboutHostedAuth = $CommandName -in @('publish-deployment', 'predeploy', 'postdeploy')
 if ($shouldWarnAboutHostedAuth -and $mode.RequiresHostedSurface -and -not $resolvedSkipHostedAuthSetup -and [string]::IsNullOrWhiteSpace($hostedAuthSecurityGroup)) {
-    Write-Warning 'Hosted publish now defaults to Entra Easy Auth. Set HOSTED_AUTH_SECURITY_GROUP or pass -SecurityGroup, or opt out with SKIP_HOSTED_AUTH_SETUP=true / -SkipAuthSetup.'
+    Write-Warning 'Hosted publish now defaults to Entra Easy Auth. HOSTED_AUTH_SECURITY_GROUP is not set, so the wrapper will allow any authenticated user in the tenant unless you pass -SecurityGroup or set HOSTED_AUTH_SECURITY_GROUP. Use SKIP_HOSTED_AUTH_SETUP=true / -SkipAuthSetup only when you want to skip wrapper auth management entirely.'
 }
 
 Write-Output '  Publish RBAC note: template upload, package upload, and SAS generation use storage data-plane APIs. The signed-in principal or DEPLOYER_PRINCIPAL_ID needs Storage Blob Data Contributor on the wrapper storage account.'

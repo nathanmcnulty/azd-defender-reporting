@@ -233,6 +233,7 @@ $result | Add-Member -NotePropertyName HostedAuthEnabled -NotePropertyValue ([bo
 $result | Add-Member -NotePropertyName HostedAuthValidationExpectation -NotePropertyValue ([string]$authResult.ValidationExpectation)
 $result | Add-Member -NotePropertyName HostedAuthSecurityGroupId -NotePropertyValue ([string]$authResult.SecurityGroupId)
 $result | Add-Member -NotePropertyName HostedAuthSecurityGroupDisplayName -NotePropertyValue ([string]$authResult.SecurityGroupDisplayName)
+$result | Add-Member -NotePropertyName HostedAuthAccessScope -NotePropertyValue ([string]$authResult.AuthAccessScope)
 $result | Add-Member -NotePropertyName HostedAuthAppRegistrationClientId -NotePropertyValue ([string]$authResult.AppRegistrationClientId)
 $result | Add-Member -NotePropertyName HostedAuthAppRegistrationDisplayName -NotePropertyValue ([string]$authResult.AppRegistrationDisplayName)
 
