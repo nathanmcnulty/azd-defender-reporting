@@ -8,7 +8,7 @@ hooks:
   preprovision:
     shell: pwsh
     run: ./scripts/Validate-Environment.ps1 -ApplyDefaults -PersistAzdEnv -CommandName preprovision
-    interactive: true
+    interactive: false
   postprovision:
     shell: pwsh
     run: ./scripts/Validate-Environment.ps1 -CommandName postprovision
@@ -16,7 +16,7 @@ hooks:
   predeploy:
     shell: pwsh
     run: ./scripts/Validate-Environment.ps1 -ApplyDefaults -PersistAzdEnv -CommandName predeploy
-    interactive: true
+    interactive: false
   postdeploy:
     shell: pwsh
     run: ./scripts/Validate-Environment.ps1 -CommandName postdeploy
