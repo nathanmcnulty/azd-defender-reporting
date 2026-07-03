@@ -161,7 +161,7 @@ Write-Output "  Deployer principal type: $(if ([string]::IsNullOrWhiteSpace($dep
 Write-Output "  azd: $(if ($azdPath) { $azdPath } else { '<missing>' })"
 Write-Output "  az: $(if ($azPath) { $azPath } else { '<missing>' })"
 
-$shouldWarnAboutHostedAuth = $CommandName -in @('publish-deployment', 'predeploy', 'postdeploy')
+$shouldWarnAboutHostedAuth = $CommandName -in @('preprovision', 'publish-deployment', 'predeploy', 'postdeploy')
 if ($shouldWarnAboutHostedAuth -and $mode.RequiresHostedSurface -and -not $resolvedSkipHostedAuthSetup -and [string]::IsNullOrWhiteSpace($hostedAuthSecurityGroup)) {
     Write-Warning 'Hosted publish now defaults to Entra Easy Auth. HOSTED_AUTH_SECURITY_GROUP is not set, so the wrapper will allow any authenticated user in the tenant unless you pass -SecurityGroup or set HOSTED_AUTH_SECURITY_GROUP. Use SKIP_HOSTED_AUTH_SETUP=true / -SkipAuthSetup only when you want to skip wrapper auth management entirely.'
 }
