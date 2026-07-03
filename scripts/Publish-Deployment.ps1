@@ -132,7 +132,7 @@ function Resolve-ComputeResourceNames {
     }
 }
 
-& (Join-Path $PSScriptRoot 'Validate-Environment.ps1') -ApplyDefaults -CommandName 'publish-deployment' | Out-Null
+& (Join-Path $PSScriptRoot 'Validate-Environment.ps1') -ApplyDefaults -PersistAzdEnv -CommandName 'publish-deployment' | Out-Null
 
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
 $resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {
