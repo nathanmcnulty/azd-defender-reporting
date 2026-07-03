@@ -111,7 +111,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    .\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg>
    ```
 
-   Hosted publish now defaults to the secured Easy Auth path. Set `HOSTED_AUTH_SECURITY_GROUP` (or pass `-SecurityGroup`) so the wrapper can assign the allowed Entra group. If you intentionally want to leave auth management to another process, pass `-SkipAuthSetup` or set `SKIP_HOSTED_AUTH_SETUP=true`. That opt-out skips auth changes; it does not remove any existing Easy Auth configuration that is already on the Container App.
+   Hosted publish now defaults to the secured Easy Auth path. Set `HOSTED_AUTH_SECURITY_GROUP` (or pass `-SecurityGroup`) so the wrapper can assign the allowed Entra group. If you intentionally want to leave auth management to another process, pass `-SkipAuthSetup` or set `SKIP_HOSTED_AUTH_SETUP=true`. That opt-out skips wrapper auth management and preserves any existing Easy Auth configuration already on the Container App.
 
    You can still run the narrower entrypoints directly when needed:
 
