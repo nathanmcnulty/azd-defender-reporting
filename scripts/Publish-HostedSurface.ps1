@@ -128,17 +128,33 @@ function Invoke-HostedSurfaceProbe {
 
     $lastStatusCode = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [System.Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds(30)
+        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Uri)
+        $response = $null
+
         try {
-            $response = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 30 -MaximumRedirection 0 -SkipHttpErrorCheck
+            $response = $client.Send($request)
             $lastStatusCode = [int]$response.StatusCode
         }
         catch {
-            if ($null -ne $_.Exception.Response) {
-                $lastStatusCode = [int]$_.Exception.Response.StatusCode
+            if ($_.Exception.PSObject.Properties.Match('StatusCode').Count -gt 0 -and $null -ne $_.Exception.StatusCode) {
+                $lastStatusCode = [int]$_.Exception.StatusCode
             }
             else {
                 throw
             }
+        }
+        finally {
+            if ($null -ne $response) {
+                $response.Dispose()
+            }
+
+            $request.Dispose()
+            $client.Dispose()
+            $handler.Dispose()
         }
 
         if ($lastStatusCode -in $ExpectedStatusCodes) {

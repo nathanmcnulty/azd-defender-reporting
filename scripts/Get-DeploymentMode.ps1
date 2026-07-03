@@ -2,17 +2,115 @@
 
 [CmdletBinding()]
 param(
-    [string]$ComputeKind = $env:COMPUTE_KIND,
-    [string]$WebKind = $env:WEB_KIND,
-    [string]$DashboardPackageMode = $env:DASHBOARD_PACKAGE_MODE
+    [string]$ComputeKind,
+    [string]$WebKind,
+    [string]$DashboardPackageMode
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-$resolvedComputeKind = if ([string]::IsNullOrWhiteSpace($ComputeKind)) { 'functionapp' } else { $ComputeKind.Trim().ToLowerInvariant() }
-$resolvedWebKind = if ([string]::IsNullOrWhiteSpace($WebKind)) { 'containerapp' } else { $WebKind.Trim().ToLowerInvariant() }
-$requestedPackageMode = if ([string]::IsNullOrWhiteSpace($DashboardPackageMode)) { 'auto' } else { $DashboardPackageMode.Trim().ToLowerInvariant() }
+function Get-AzdEnvironmentValues {
+    [CmdletBinding()]
+    param()
+
+    $script:cachedAzdValues = if (Get-Variable -Name cachedAzdValues -Scope Script -ErrorAction SilentlyContinue) {
+        $script:cachedAzdValues
+    }
+    else {
+        $null
+    }
+
+    if ($null -ne $script:cachedAzdValues) {
+        return $script:cachedAzdValues
+    }
+
+    $script:cachedAzdValues = @{}
+    $azdCommand = Get-Command -Name 'azd' -ErrorAction SilentlyContinue
+    if ($null -eq $azdCommand) {
+        return $script:cachedAzdValues
+    }
+
+    $commandOutput = @(& $azdCommand.Source env get-values 2>&1)
+    if ($LASTEXITCODE -ne 0) {
+        return $script:cachedAzdValues
+    }
+
+    $commandText = (($commandOutput | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+            $_.Exception.Message
+        }
+        else {
+            [string]$_
+        }
+    }) -join [Environment]::NewLine).Trim()
+    if ([string]::IsNullOrWhiteSpace($commandText)) {
+        return $script:cachedAzdValues
+    }
+
+    foreach ($line in ($commandText -split "`r?`n")) {
+        if ($line -notmatch '^(?:export\s+)?([A-Za-z0-9_]+)=(.*)$') {
+            continue
+        }
+
+        $name = $Matches[1]
+        $rawValue = $Matches[2].Trim()
+        if ($rawValue.Length -ge 2) {
+            $quote = $rawValue[0]
+            if (($quote -eq '"' -or $quote -eq "'") -and $rawValue[-1] -eq $quote) {
+                $rawValue = $rawValue.Substring(1, $rawValue.Length - 2)
+            }
+        }
+
+        $script:cachedAzdValues[$name] = $rawValue
+    }
+
+    return $script:cachedAzdValues
+}
+
+function Get-ConfigurationValue {
+    [CmdletBinding()]
+    param(
+        [string]$ExplicitValue,
+        [Parameter(Mandatory = $true)]
+        [string]$ResolvedName,
+        [Parameter(Mandatory = $true)]
+        [string]$RawName
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitValue)) {
+        return $ExplicitValue
+    }
+
+    $processResolved = [Environment]::GetEnvironmentVariable($ResolvedName, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processResolved)) {
+        return $processResolved
+    }
+
+    $azdValues = Get-AzdEnvironmentValues
+    if ($azdValues.ContainsKey($ResolvedName) -and -not [string]::IsNullOrWhiteSpace([string]$azdValues[$ResolvedName])) {
+        return [string]$azdValues[$ResolvedName]
+    }
+
+    $processRaw = [Environment]::GetEnvironmentVariable($RawName, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processRaw)) {
+        return $processRaw
+    }
+
+    if ($azdValues.ContainsKey($RawName) -and -not [string]::IsNullOrWhiteSpace([string]$azdValues[$RawName])) {
+        return [string]$azdValues[$RawName]
+    }
+
+    return $null
+}
+
+$effectiveComputeKind = Get-ConfigurationValue -ExplicitValue $ComputeKind -ResolvedName 'computeKindResolved' -RawName 'COMPUTE_KIND'
+$effectiveWebKind = Get-ConfigurationValue -ExplicitValue $WebKind -ResolvedName 'webKindResolved' -RawName 'WEB_KIND'
+$effectivePackageMode = Get-ConfigurationValue -ExplicitValue $DashboardPackageMode -ResolvedName 'dashboardPackageModeResolved' -RawName 'DASHBOARD_PACKAGE_MODE'
+
+$resolvedComputeKind = if ([string]::IsNullOrWhiteSpace($effectiveComputeKind)) { 'functionapp' } else { $effectiveComputeKind.Trim().ToLowerInvariant() }
+$resolvedWebKind = if ([string]::IsNullOrWhiteSpace($effectiveWebKind)) { 'containerapp' } else { $effectiveWebKind.Trim().ToLowerInvariant() }
+$requestedPackageMode = if ([string]::IsNullOrWhiteSpace($effectivePackageMode)) { 'auto' } else { $effectivePackageMode.Trim().ToLowerInvariant() }
 
 $allowedComputeKinds = @('functionapp', 'automation')
 $allowedWebKinds = @('containerapp', 'none')
@@ -54,4 +152,3 @@ if (($resolvedWebKind -eq 'none') -and ($effectivePackageMode -eq 'hosted')) {
     RequiresAutomationPublish = ($resolvedComputeKind -eq 'automation')
     RequiresHostedSurface = ($resolvedWebKind -eq 'containerapp')
 }
-

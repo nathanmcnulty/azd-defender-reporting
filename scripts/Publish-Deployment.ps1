@@ -42,6 +42,7 @@ function Resolve-StorageAccountName {
             '--output', 'json'
         )
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $storageAccounts = @($storageAccounts)
 
     if ($storageAccounts.Count -eq 0) {
         throw "No storage account resources were found in resource group '$ResourceGroupName'."
@@ -133,6 +134,13 @@ function Resolve-ComputeResourceNames {
 }
 
 & (Join-Path $PSScriptRoot 'Validate-Environment.ps1') -ApplyDefaults -PersistAzdEnv -CommandName 'publish-deployment' | Out-Null
+
+$ResourceGroupName = if ([string]::IsNullOrWhiteSpace($ResourceGroupName)) { Get-EnvironmentValue -Name 'AZURE_RESOURCE_GROUP' } else { $ResourceGroupName }
+$SecurityGroup = if ([string]::IsNullOrWhiteSpace($SecurityGroup)) { Get-EnvironmentValue -Name 'HOSTED_AUTH_SECURITY_GROUP' } else { $SecurityGroup }
+$AppRegistrationDisplayName = if ([string]::IsNullOrWhiteSpace($AppRegistrationDisplayName)) { Get-EnvironmentValue -Name 'HOSTED_AUTH_APP_DISPLAY_NAME' } else { $AppRegistrationDisplayName }
+$RepositoryPath = if ([string]::IsNullOrWhiteSpace($RepositoryPath)) { Get-EnvironmentValue -Name 'DEFENDER_REPORTING_PATH' } else { $RepositoryPath }
+$RepositoryUrl = if ([string]::IsNullOrWhiteSpace($RepositoryUrl)) { Get-EnvironmentValue -Name 'DEFENDER_REPORTING_REPO' } else { $RepositoryUrl }
+$Ref = if ([string]::IsNullOrWhiteSpace($Ref)) { Get-EnvironmentValue -Name 'DEFENDER_REPORTING_REF' } else { $Ref }
 
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
 $resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {

@@ -294,12 +294,13 @@ function Ensure-SecurityGroupAssignment {
         [string]$SecurityGroupId
     )
 
-    $assignmentQueryUrl = '{0}/v1.0/servicePrincipals/{1}/appRoleAssignedTo?{2}&{3}' -f `
+    $assignmentQueryUrl = '{0}/v1.0/servicePrincipals/{1}/appRoleAssignedTo?{2}' -f `
         $graphApiBaseUrl, `
         $ServicePrincipalObjectId, `
-        (Join-QueryParameter -Name '$filter' -Value ("principalId eq '$SecurityGroupId'")), `
         (Join-QueryParameter -Name '$select' -Value 'id,principalId')
-    $existingAssignments = @((Invoke-AzRestJson -Method GET -Url $assignmentQueryUrl).value)
+    $existingAssignments = @(@((Invoke-AzRestJson -Method GET -Url $assignmentQueryUrl).value) | Where-Object {
+        [string]$_.principalId -eq $SecurityGroupId
+    })
     if ($existingAssignments.Count -gt 0) {
         return
     }

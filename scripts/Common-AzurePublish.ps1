@@ -70,6 +70,60 @@ function Test-AzRestNotFound {
     return ($Text -match '(?i)\b(404|not\s+found|ResourceNotFound|No HTTP resource was found)\b')
 }
 
+function Get-AzAccessToken {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+
+    $requestUri = [System.Uri]$Url
+    $hostName = $requestUri.Host.ToLowerInvariant()
+    $tokenCacheName = 'AzAccessTokenCache'
+    $tokenCache = Get-Variable -Name $tokenCacheName -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $tokenCache) {
+        $script:AzAccessTokenCache = @{}
+    }
+
+    $resourceKey = switch ($hostName) {
+        'management.azure.com' { 'arm'; break }
+        'graph.microsoft.com' { 'ms-graph'; break }
+        default { '{0}://{1}/' -f $requestUri.Scheme, $requestUri.Host; break }
+    }
+
+    if ($script:AzAccessTokenCache.ContainsKey($resourceKey)) {
+        $cachedToken = $script:AzAccessTokenCache[$resourceKey]
+        if ($cachedToken.ExpiresOn -gt (Get-Date).AddMinutes(5)) {
+            return $cachedToken.AccessToken
+        }
+    }
+
+    $tokenArguments = @('account', 'get-access-token', '--output', 'json')
+    if ($resourceKey -in @('arm', 'ms-graph')) {
+        $tokenArguments += @('--resource-type', $resourceKey)
+    }
+    else {
+        $tokenArguments += @('--resource', $resourceKey)
+    }
+
+    $tokenResponse = Get-AzCliJson -Arguments $tokenArguments
+    if ($null -eq $tokenResponse -or [string]::IsNullOrWhiteSpace([string]$tokenResponse.accessToken)) {
+        throw "Failed to acquire an Azure access token for '$resourceKey'."
+    }
+
+    $expiresOn = Get-Date
+    if ($tokenResponse.PSObject.Properties.Match('expiresOn').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$tokenResponse.expiresOn)) {
+        $expiresOn = [datetimeoffset]::Parse([string]$tokenResponse.expiresOn).UtcDateTime
+    }
+
+    $script:AzAccessTokenCache[$resourceKey] = [PSCustomObject]@{
+        AccessToken = [string]$tokenResponse.accessToken
+        ExpiresOn = $expiresOn
+    }
+
+    return [string]$tokenResponse.accessToken
+}
+
 function Invoke-AzRestJson {
     [CmdletBinding()]
     param(
@@ -83,32 +137,57 @@ function Invoke-AzRestJson {
         [switch]$AllowNotFound
     )
 
-    $arguments = @(
-        'rest',
-        '--method', $Method,
-        '--url', $Url,
-        '--only-show-errors'
-    )
+    $headers = @{
+        Authorization = 'Bearer {0}' -f (Get-AzAccessToken -Url $Url)
+        Accept = 'application/json'
+    }
+
+    $requestArguments = @{
+        Method = $Method
+        Uri = $Url
+        Headers = $headers
+        UseBasicParsing = $true
+        SkipHttpErrorCheck = $true
+    }
 
     if ($PSBoundParameters.ContainsKey('Body') -and $Method -notin @('GET', 'DELETE')) {
-        $arguments += @('--body', $Body)
+        $requestArguments.Body = $Body
+        $requestArguments.ContentType = 'application/json'
     }
 
-    $commandOutput = @(az @arguments 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0) {
-        if ($AllowNotFound -and (Test-AzRestNotFound -Text $commandText)) {
-            return $null
-        }
+    $response = Invoke-WebRequest @requestArguments
+    $statusCode = [int]$response.StatusCode
+    $responseText = [string]$response.Content
 
-        throw $commandText
-    }
-
-    if ([string]::IsNullOrWhiteSpace($commandText)) {
+    if ($statusCode -eq 404 -and $AllowNotFound) {
         return $null
     }
 
-    return $commandText | ConvertFrom-Json
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        if ($AllowNotFound -and (Test-AzRestNotFound -Text $responseText)) {
+            return $null
+        }
+
+        $errorText = if ([string]::IsNullOrWhiteSpace($responseText)) {
+            'Request failed with no response body.'
+        }
+        else {
+            $responseText
+        }
+
+        throw "HTTP $statusCode from '$Url': $errorText"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($responseText)) {
+        return $null
+    }
+
+    try {
+        return $responseText | ConvertFrom-Json
+    }
+    catch {
+        return $responseText
+    }
 }
 
 function Resolve-BooleanString {
@@ -144,7 +223,8 @@ function Get-AzdEnvironmentValues {
     [CmdletBinding()]
     param()
 
-    if ($script:AzdEnvironmentValues) {
+    $cachedValues = Get-Variable -Name AzdEnvironmentValues -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $cachedValues) {
         return $script:AzdEnvironmentValues
     }
 
@@ -218,6 +298,7 @@ function Resolve-ResourceGroupNameFromResource {
             '--output', 'json'
         )
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $resourceGroups = @($resourceGroups)
 
     if ($resourceGroups.Count -eq 0) {
         throw "Resource '$ResourceName' of type '$ResourceType' was not found."
@@ -251,6 +332,7 @@ function Resolve-SingleResourceNameInGroup {
             '--output', 'json'
         )
     ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $resourceNames = @($resourceNames)
 
     if ($resourceNames.Count -eq 0) {
         throw "No $FriendlyName resources were found in resource group '$ResourceGroupName'."

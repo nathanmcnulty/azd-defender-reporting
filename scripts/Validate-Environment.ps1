@@ -14,6 +14,28 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Path $PSCommandPath -Parent
 $repoRoot = Split-Path -Path $scriptRoot -Parent
 
+function Get-TextFromProcessOutput {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [object[]]$Output = @()
+    )
+
+    if ($null -eq $Output -or $Output.Count -eq 0) {
+        return ''
+    }
+
+    return (($Output | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+            $_.Exception.Message
+        }
+        else {
+            [string]$_
+        }
+    }) -join [Environment]::NewLine).Trim()
+}
+
 function Set-ProcessAndAzdDefault {
     [CmdletBinding()]
     param(
@@ -121,22 +143,181 @@ function Resolve-BooleanEnvironmentSetting {
     }
 }
 
+function Get-AzdEnvironmentValues {
+    [CmdletBinding()]
+    param()
+
+    $cachedValues = Get-Variable -Name AzdEnvironmentValues -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $cachedValues) {
+        return $script:AzdEnvironmentValues
+    }
+
+    $script:AzdEnvironmentValues = @{}
+    $azdCommand = Get-Command -Name 'azd' -ErrorAction SilentlyContinue
+    if ($null -eq $azdCommand) {
+        return $script:AzdEnvironmentValues
+    }
+
+    $commandOutput = @(& $azdCommand.Source env get-values 2>&1)
+    $commandText = Get-TextFromProcessOutput -Output $commandOutput
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commandText)) {
+        return $script:AzdEnvironmentValues
+    }
+
+    foreach ($line in ($commandText -split "`r?`n")) {
+        if ($line -notmatch '^(?:export\s+)?([A-Za-z0-9_]+)=(.*)$') {
+            continue
+        }
+
+        $name = $Matches[1]
+        $rawValue = $Matches[2].Trim()
+        if ($rawValue.Length -ge 2) {
+            $quote = $rawValue[0]
+            if (($quote -eq '"' -or $quote -eq "'") -and $rawValue[-1] -eq $quote) {
+                $rawValue = $rawValue.Substring(1, $rawValue.Length - 2)
+            }
+        }
+
+        $script:AzdEnvironmentValues[$name] = $rawValue
+    }
+
+    return $script:AzdEnvironmentValues
+}
+
+function Get-EnvironmentValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+
+    $azdValues = Get-AzdEnvironmentValues
+    if ($azdValues.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace([string]$azdValues[$Name])) {
+        return [string]$azdValues[$Name]
+    }
+
+    return $null
+}
+
+function Import-AzdEnvironmentValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+
+    $azdValues = Get-AzdEnvironmentValues
+    if (-not $azdValues.ContainsKey($Name)) {
+        return $null
+    }
+
+    $resolvedValue = [string]$azdValues[$Name]
+    if ([string]::IsNullOrWhiteSpace($resolvedValue)) {
+        return $null
+    }
+
+    [Environment]::SetEnvironmentVariable($Name, $resolvedValue, 'Process')
+    return $resolvedValue
+}
+
+function Test-CanPrompt {
+    [CmdletBinding()]
+    param()
+
+    if ($env:CI -or $env:GITHUB_ACTIONS) {
+        return $false
+    }
+
+    try {
+        $null = $Host.UI.RawUI
+        return [Environment]::UserInteractive
+    }
+    catch {
+        return $false
+    }
+}
+
+function Resolve-HostedAuthSecurityGroupSetting {
+    [CmdletBinding()]
+    param(
+        [string]$CurrentValue,
+        [bool]$RequiresHostedSurface,
+        [bool]$SkipHostedAuthSetup
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($CurrentValue) -or -not $RequiresHostedSurface -or $SkipHostedAuthSetup) {
+        return $CurrentValue
+    }
+
+    if ($CommandName -notin @('preprovision', 'publish-deployment')) {
+        return $CurrentValue
+    }
+
+    if (-not (Test-CanPrompt)) {
+        return $CurrentValue
+    }
+
+    Write-Warning 'Hosted publish defaults to Entra Easy Auth. Enter a group object ID or unique display name to restrict access, or press Enter to allow any authenticated user in the tenant.'
+    $promptValue = Read-Host 'Optional HOSTED_AUTH_SECURITY_GROUP'
+    if ([string]::IsNullOrWhiteSpace($promptValue)) {
+        return $null
+    }
+
+    $resolvedValue = $promptValue.Trim()
+    Set-ProcessAndAzdDefault -Name 'HOSTED_AUTH_SECURITY_GROUP' -Value $resolvedValue
+    return $resolvedValue
+}
+
 Set-ProcessAndAzdDefault -Name 'COMPUTE_KIND' -Value 'functionapp'
 Set-ProcessAndAzdDefault -Name 'WEB_KIND' -Value 'containerapp'
 Set-ProcessAndAzdDefault -Name 'DASHBOARD_PACKAGE_MODE' -Value 'auto'
 Set-ProcessAndAzdDefault -Name 'SKIP_HOSTED_AUTH_SETUP' -Value 'false'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REPO' -Value 'https://github.com/nathanmcnulty/defender-reporting.git'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value 'main'
+
+@(
+    'AZURE_RESOURCE_GROUP',
+    'COMPUTE_KIND',
+    'WEB_KIND',
+    'DASHBOARD_PACKAGE_MODE',
+    'SKIP_HOSTED_AUTH_SETUP',
+    'HOSTED_AUTH_SECURITY_GROUP',
+    'HOSTED_AUTH_APP_DISPLAY_NAME',
+    'DEFENDER_REPORTING_REPO',
+    'DEFENDER_REPORTING_REF',
+    'DEFENDER_REPORTING_PATH',
+    'DEPLOYER_PRINCIPAL_ID',
+    'DEPLOYER_PRINCIPAL_TYPE'
+) | ForEach-Object {
+    Import-AzdEnvironmentValue -Name $_ | Out-Null
+}
+
 Set-DeployerPrincipalDefaults
 
 $mode = & (Join-Path $scriptRoot 'Get-DeploymentMode.ps1')
-$resolvedSkipHostedAuthSetup = Resolve-BooleanEnvironmentSetting -Value ([Environment]::GetEnvironmentVariable('SKIP_HOSTED_AUTH_SETUP', 'Process')) -Default $false
-$hostedAuthSecurityGroup = [Environment]::GetEnvironmentVariable('HOSTED_AUTH_SECURITY_GROUP', 'Process')
-$deployerPrincipalId = [Environment]::GetEnvironmentVariable('DEPLOYER_PRINCIPAL_ID', 'Process')
-$deployerPrincipalType = [Environment]::GetEnvironmentVariable('DEPLOYER_PRINCIPAL_TYPE', 'Process')
+$resolvedSkipHostedAuthSetup = Resolve-BooleanEnvironmentSetting -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
+$hostedAuthSecurityGroup = Resolve-HostedAuthSecurityGroupSetting `
+    -CurrentValue (Get-EnvironmentValue -Name 'HOSTED_AUTH_SECURITY_GROUP') `
+    -RequiresHostedSurface ([bool]$mode.RequiresHostedSurface) `
+    -SkipHostedAuthSetup $resolvedSkipHostedAuthSetup
+$deployerPrincipalId = Get-EnvironmentValue -Name 'DEPLOYER_PRINCIPAL_ID'
+$deployerPrincipalType = Get-EnvironmentValue -Name 'DEPLOYER_PRINCIPAL_TYPE'
+$upstreamRepository = Get-EnvironmentValue -Name 'DEFENDER_REPORTING_REPO'
+$upstreamRef = Get-EnvironmentValue -Name 'DEFENDER_REPORTING_REF'
+$upstreamPath = Get-EnvironmentValue -Name 'DEFENDER_REPORTING_PATH'
 
-if ($CheckUpstreamPath -and -not [string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_PATH)) {
-    $fullPath = [System.IO.Path]::GetFullPath($env:DEFENDER_REPORTING_PATH)
+if ($CheckUpstreamPath -and -not [string]::IsNullOrWhiteSpace($upstreamPath)) {
+    $fullPath = [System.IO.Path]::GetFullPath($upstreamPath)
     if (-not (Test-Path -LiteralPath $fullPath -PathType Container)) {
         throw "DEFENDER_REPORTING_PATH does not exist: $fullPath"
     }
@@ -153,9 +334,9 @@ Write-Output "  Requested package mode: $($mode.RequestedPackageMode)"
 Write-Output "  Effective package mode: $($mode.EffectivePackageMode)"
 Write-Output "  Skip hosted auth setup: $resolvedSkipHostedAuthSetup"
 Write-Output "  Hosted auth security group: $(if ([string]::IsNullOrWhiteSpace($hostedAuthSecurityGroup)) { '<not set>' } else { $hostedAuthSecurityGroup })"
-Write-Output "  Upstream repo: $($env:DEFENDER_REPORTING_REPO)"
-Write-Output "  Upstream ref: $($env:DEFENDER_REPORTING_REF)"
-Write-Output "  Upstream path override: $(if ([string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_PATH)) { '<none>' } else { [System.IO.Path]::GetFullPath($env:DEFENDER_REPORTING_PATH) })"
+Write-Output "  Upstream repo: $upstreamRepository"
+Write-Output "  Upstream ref: $upstreamRef"
+Write-Output "  Upstream path override: $(if ([string]::IsNullOrWhiteSpace($upstreamPath)) { '<none>' } else { [System.IO.Path]::GetFullPath($upstreamPath) })"
 Write-Output "  Deployer principal id: $(if ([string]::IsNullOrWhiteSpace($deployerPrincipalId)) { '<not set>' } else { $deployerPrincipalId })"
 Write-Output "  Deployer principal type: $(if ([string]::IsNullOrWhiteSpace($deployerPrincipalType)) { '<not set>' } else { $deployerPrincipalType })"
 Write-Output "  azd: $(if ($azdPath) { $azdPath } else { '<missing>' })"
@@ -175,9 +356,9 @@ Write-Output '  Publish RBAC note: template upload, package upload, and SAS gene
     EffectivePackageMode = $mode.EffectivePackageMode
     SkipHostedAuthSetup = $resolvedSkipHostedAuthSetup
     HostedAuthSecurityGroup = $hostedAuthSecurityGroup
-    UpstreamRepository = $env:DEFENDER_REPORTING_REPO
-    UpstreamRef = $env:DEFENDER_REPORTING_REF
-    UpstreamPath = $env:DEFENDER_REPORTING_PATH
+    UpstreamRepository = $upstreamRepository
+    UpstreamRef = $upstreamRef
+    UpstreamPath = $upstreamPath
     DeployerPrincipalId = $deployerPrincipalId
     DeployerPrincipalType = $deployerPrincipalType
     AzdPath = $azdPath
