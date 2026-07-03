@@ -8,7 +8,8 @@ param(
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
     [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
-    [switch]$BuildOnly
+    [switch]$BuildOnly,
+    [switch]$SkipTemplatePublish
 )
 
 Set-StrictMode -Version Latest
@@ -361,9 +362,11 @@ if ($null -eq $automationAccount -or [string]::IsNullOrWhiteSpace([string]$autom
 
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName
 
-& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
-    -StorageAccountName $resolvedStorageAccountName `
-    -RepositoryPath $upstreamRepo.ResolvedPath | Out-Null
+if (-not $SkipTemplatePublish) {
+    & (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+        -StorageAccountName $resolvedStorageAccountName `
+        -RepositoryPath $upstreamRepo.ResolvedPath | Out-Null
+}
 
 $subscriptionId = (Get-AzCliText -Arguments @('account', 'show', '--query', 'id', '--output', 'tsv')).Trim()
 if ([string]::IsNullOrWhiteSpace($subscriptionId)) {

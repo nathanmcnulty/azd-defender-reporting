@@ -39,8 +39,9 @@ The wrapper builds the upstream runbook, uploads template assets, creates or upd
 The **hosted web surface** is a blob-backed Container App:
 
 - image default: `docker.io/library/caddy:alpine`
-- wrapper publish script: `scripts\Publish-HostedSurface.ps1`
+- wrapper publish scripts: `scripts\Publish-Deployment.ps1` (top-level) and `scripts\Publish-HostedSurface.ps1` (hosted-only)
 - runtime behavior: managed identity reads the `dashboards` container and serves the latest hosted dashboard or a placeholder page
+- default hosted publish behavior: configure Entra ID Easy Auth; use a security-group restriction when configured, otherwise allow any authenticated user in the tenant unless you explicitly opt out
 
 ## Deployment model
 
@@ -89,6 +90,7 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    azd env set COMPUTE_KIND automation
    azd env set WEB_KIND none
    azd env set DEFENDER_REPORTING_REF main
+   azd env set HOSTED_AUTH_SECURITY_GROUP "Dashboard Viewers"  # optional; omit for tenant-wide authenticated-user access
    ```
 
 4. Run the local wrapper validation.
@@ -103,23 +105,31 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    azd provision
    ```
 
-6. Publish the compute or hosted surface you want to exercise.
+6. Publish through the wrapper-owned orchestrator.
+
+   ```powershell
+   .\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg>
+   ```
+
+   Hosted publish now defaults to the secured Easy Auth path. If `HOSTED_AUTH_SECURITY_GROUP` (or `-SecurityGroup`) is set, the wrapper restricts access to that Entra group. If it is omitted, the wrapper still configures Easy Auth but allows any authenticated user in the tenant. If you intentionally want to leave auth management to another process, pass `-SkipAuthSetup` or set `SKIP_HOSTED_AUTH_SETUP=true`. That opt-out skips wrapper auth management and preserves any existing Easy Auth configuration already on the Container App.
+
+   You can still run the narrower entrypoints directly when needed:
 
    ```powershell
    .\scripts\Publish-FunctionAppPackage.ps1 -ResourceGroupName <rg> -FunctionAppName <func>
    .\scripts\Publish-AutomationRunbook.ps1 -ResourceGroupName <rg> -AutomationAccountName <account>
-   .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app>
+   .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app> -SecurityGroup "Dashboard Viewers"
+   .\scripts\Publish-HostedSurface.ps1 -ResourceGroupName <rg> -ContainerAppName <app>  # tenant-wide authenticated-user access
    ```
 
-At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can publish the upstream Function App, Automation Account, and hosted Container App surfaces when the upstream repo path or ref is available.
+At this stage the wrapper provisions the Azure resource matrix, validates the local contracts, and can publish the upstream Function App, Automation Account, template assets, and hosted Container App surfaces when the upstream repo path or ref is available.
 
-For publish operations, the signed-in operator needs blob data access to the wrapper storage account. The wrapper now accepts `DEPLOYER_PRINCIPAL_ID` and `DEPLOYER_PRINCIPAL_TYPE` and will auto-populate them during environment validation when Azure CLI can resolve the signed-in principal.
+For publish operations, the signed-in operator needs blob **data-plane** access to the wrapper storage account. Template upload, Function App package upload, and SAS generation all use storage data-plane APIs. The wrapper accepts `DEPLOYER_PRINCIPAL_ID` and `DEPLOYER_PRINCIPAL_TYPE` and will auto-populate them during environment validation when Azure CLI can resolve the signed-in principal.
 
 ## Files added by this scaffold
 
 - `azure.yaml` - azd workflow and hook registration
 - `infra/` - Bicep modules for storage, monitoring, Function App, Automation Account, and Container App
-<<<<<<< HEAD
 - `scripts/` - validation, mode normalization, upstream resolution, and publish orchestration
 - `docs/` - wrapper-specific behavior and operating notes
 
@@ -138,6 +148,12 @@ It currently validates:
 - Bicep compilation through `az bicep build`
 - optional upstream Function App package build-only validation
 - optional upstream Automation runbook build-only validation
+
+The publish entrypoint also supports a non-mutating plan mode:
+
+```powershell
+.\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg> -PlanOnly
+```
 
 Optional deeper validation can also exercise the upstream Function App package contract when you point the wrapper at a local `defender-reporting` checkout.
 

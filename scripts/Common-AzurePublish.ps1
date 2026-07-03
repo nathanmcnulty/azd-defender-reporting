@@ -1,0 +1,346 @@
+#Requires -Version 7.0
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+
+function Get-TextFromProcessOutput {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [AllowEmptyCollection()]
+        [object[]]$Output = @()
+    )
+
+    if ($null -eq $Output -or $Output.Count -eq 0) {
+        return ''
+    }
+
+    return (($Output | ForEach-Object {
+        if ($_ -is [System.Management.Automation.ErrorRecord]) {
+            $_.Exception.Message
+        }
+        else {
+            [string]$_
+        }
+    }) -join [Environment]::NewLine).Trim()
+}
+
+function Get-AzCliJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $commandOutput = @(az @Arguments 2>&1)
+    $commandText = Get-TextFromProcessOutput -Output $commandOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw $commandText
+    }
+
+    if ([string]::IsNullOrWhiteSpace($commandText)) {
+        return $null
+    }
+
+    return $commandText | ConvertFrom-Json
+}
+
+function Get-AzCliText {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string[]]$Arguments
+    )
+
+    $commandOutput = @(az @Arguments 2>&1)
+    $commandText = Get-TextFromProcessOutput -Output $commandOutput
+    if ($LASTEXITCODE -ne 0) {
+        throw $commandText
+    }
+
+    return $commandText
+}
+
+function Test-AzRestNotFound {
+    [CmdletBinding()]
+    param(
+        [string]$Text
+    )
+
+    return ($Text -match '(?i)\b(404|not\s+found|ResourceNotFound|No HTTP resource was found)\b')
+}
+
+function Get-AzAccessToken {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Url
+    )
+
+    $requestUri = [System.Uri]$Url
+    $hostName = $requestUri.Host.ToLowerInvariant()
+    $tokenCacheName = 'AzAccessTokenCache'
+    $tokenCache = Get-Variable -Name $tokenCacheName -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $tokenCache) {
+        $script:AzAccessTokenCache = @{}
+    }
+
+    $resourceKey = switch ($hostName) {
+        'management.azure.com' { 'arm'; break }
+        'graph.microsoft.com' { 'ms-graph'; break }
+        default { '{0}://{1}/' -f $requestUri.Scheme, $requestUri.Host; break }
+    }
+
+    if ($script:AzAccessTokenCache.ContainsKey($resourceKey)) {
+        $cachedToken = $script:AzAccessTokenCache[$resourceKey]
+        if ($cachedToken.ExpiresOn -gt (Get-Date).AddMinutes(5)) {
+            return $cachedToken.AccessToken
+        }
+    }
+
+    $tokenArguments = @('account', 'get-access-token', '--output', 'json')
+    if ($resourceKey -in @('arm', 'ms-graph')) {
+        $tokenArguments += @('--resource-type', $resourceKey)
+    }
+    else {
+        $tokenArguments += @('--resource', $resourceKey)
+    }
+
+    $tokenResponse = Get-AzCliJson -Arguments $tokenArguments
+    if ($null -eq $tokenResponse -or [string]::IsNullOrWhiteSpace([string]$tokenResponse.accessToken)) {
+        throw "Failed to acquire an Azure access token for '$resourceKey'."
+    }
+
+    $expiresOn = Get-Date
+    if ($tokenResponse.PSObject.Properties.Match('expiresOn').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$tokenResponse.expiresOn)) {
+        $expiresOn = [datetimeoffset]::Parse([string]$tokenResponse.expiresOn).UtcDateTime
+    }
+
+    $script:AzAccessTokenCache[$resourceKey] = [PSCustomObject]@{
+        AccessToken = [string]$tokenResponse.accessToken
+        ExpiresOn = $expiresOn
+    }
+
+    return [string]$tokenResponse.accessToken
+}
+
+function Invoke-AzRestJson {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [ValidateSet('GET', 'POST', 'PUT', 'PATCH', 'DELETE')]
+        [string]$Method,
+        [Parameter(Mandatory = $true)]
+        [string]$Url,
+        [AllowNull()]
+        [string]$Body,
+        [switch]$AllowNotFound
+    )
+
+    $headers = @{
+        Authorization = 'Bearer {0}' -f (Get-AzAccessToken -Url $Url)
+        Accept = 'application/json'
+    }
+
+    $requestArguments = @{
+        Method = $Method
+        Uri = $Url
+        Headers = $headers
+        UseBasicParsing = $true
+        SkipHttpErrorCheck = $true
+    }
+
+    if ($PSBoundParameters.ContainsKey('Body') -and $Method -notin @('GET', 'DELETE')) {
+        $requestArguments.Body = $Body
+        $requestArguments.ContentType = 'application/json'
+    }
+
+    $response = Invoke-WebRequest @requestArguments
+    $statusCode = [int]$response.StatusCode
+    $responseText = [string]$response.Content
+
+    if ($statusCode -eq 404 -and $AllowNotFound) {
+        return $null
+    }
+
+    if ($statusCode -lt 200 -or $statusCode -ge 300) {
+        if ($AllowNotFound -and (Test-AzRestNotFound -Text $responseText)) {
+            return $null
+        }
+
+        $errorText = if ([string]::IsNullOrWhiteSpace($responseText)) {
+            'Request failed with no response body.'
+        }
+        else {
+            $responseText
+        }
+
+        throw "HTTP $statusCode from '$Url': $errorText"
+    }
+
+    if ([string]::IsNullOrWhiteSpace($responseText)) {
+        return $null
+    }
+
+    try {
+        return $responseText | ConvertFrom-Json
+    }
+    catch {
+        return $responseText
+    }
+}
+
+function Resolve-BooleanString {
+    [CmdletBinding()]
+    param(
+        [AllowNull()]
+        [string]$Value,
+        [bool]$Default = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Default
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        '1' { return $true }
+        'true' { return $true }
+        'yes' { return $true }
+        'y' { return $true }
+        'on' { return $true }
+        '0' { return $false }
+        'false' { return $false }
+        'no' { return $false }
+        'n' { return $false }
+        'off' { return $false }
+        default {
+            throw "Unable to interpret boolean value '$Value'."
+        }
+    }
+}
+
+function Get-AzdEnvironmentValues {
+    [CmdletBinding()]
+    param()
+
+    $cachedValues = Get-Variable -Name AzdEnvironmentValues -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $cachedValues) {
+        return $script:AzdEnvironmentValues
+    }
+
+    $script:AzdEnvironmentValues = @{}
+    $azdCommand = Get-Command -Name 'azd' -ErrorAction SilentlyContinue
+    if ($null -eq $azdCommand) {
+        return $script:AzdEnvironmentValues
+    }
+
+    $commandOutput = @(& $azdCommand.Source env get-values 2>&1)
+    $commandText = Get-TextFromProcessOutput -Output $commandOutput
+    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commandText)) {
+        return $script:AzdEnvironmentValues
+    }
+
+    foreach ($line in ($commandText -split "`r?`n")) {
+        if ($line -notmatch '^(?:export\s+)?([A-Za-z0-9_]+)=(.*)$') {
+            continue
+        }
+
+        $name = $Matches[1]
+        $rawValue = $Matches[2].Trim()
+        if ($rawValue.Length -ge 2) {
+            $quote = $rawValue[0]
+            if (($quote -eq '"' -or $quote -eq "'") -and $rawValue[-1] -eq $quote) {
+                $rawValue = $rawValue.Substring(1, $rawValue.Length - 2)
+            }
+        }
+
+        $script:AzdEnvironmentValues[$name] = $rawValue
+    }
+
+    return $script:AzdEnvironmentValues
+}
+
+function Get-EnvironmentValue {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Name
+    )
+
+    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
+        return $processValue
+    }
+
+    $azdValues = Get-AzdEnvironmentValues
+    if ($azdValues.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace([string]$azdValues[$Name])) {
+        return [string]$azdValues[$Name]
+    }
+
+    return $null
+}
+
+function Resolve-ResourceGroupNameFromResource {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceName,
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceType
+    )
+
+    $resourceGroups = @(
+        Get-AzCliJson -Arguments @(
+            'resource', 'list',
+            '--name', $ResourceName,
+            '--resource-type', $ResourceType,
+            '--query', '[].resourceGroup',
+            '--output', 'json'
+        )
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $resourceGroups = @($resourceGroups)
+
+    if ($resourceGroups.Count -eq 0) {
+        throw "Resource '$ResourceName' of type '$ResourceType' was not found."
+    }
+
+    $uniqueGroups = @($resourceGroups | Sort-Object -Unique)
+    if ($uniqueGroups.Count -gt 1) {
+        throw "Resource '$ResourceName' of type '$ResourceType' exists in multiple resource groups: $($uniqueGroups -join ', '). Pass -ResourceGroupName explicitly."
+    }
+
+    return [string]$uniqueGroups[0]
+}
+
+function Resolve-SingleResourceNameInGroup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceType,
+        [Parameter(Mandatory = $true)]
+        [string]$FriendlyName
+    )
+
+    $resourceNames = @(
+        Get-AzCliJson -Arguments @(
+            'resource', 'list',
+            '--resource-group', $ResourceGroupName,
+            '--resource-type', $ResourceType,
+            '--query', '[].name',
+            '--output', 'json'
+        )
+    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
+    $resourceNames = @($resourceNames)
+
+    if ($resourceNames.Count -eq 0) {
+        throw "No $FriendlyName resources were found in resource group '$ResourceGroupName'."
+    }
+
+    if ($resourceNames.Count -gt 1) {
+        throw "Multiple $FriendlyName resources were found in resource group '$ResourceGroupName': $($resourceNames -join ', '). Pass the name explicitly."
+    }
+
+    return [string]$resourceNames[0]
+}

@@ -5,10 +5,14 @@ param(
     [string]$ContainerAppName,
     [string]$ResourceGroupName,
     [string]$StorageAccountName,
+    [string]$SecurityGroup = $env:HOSTED_AUTH_SECURITY_GROUP,
+    [string]$AppRegistrationDisplayName = $env:HOSTED_AUTH_APP_DISPLAY_NAME,
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
     [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
-    [switch]$PlanOnly
+    [switch]$PlanOnly,
+    [switch]$SkipAuthSetup,
+    [switch]$SkipTemplatePublish
 )
 
 Set-StrictMode -Version Latest
@@ -56,6 +60,32 @@ function Get-AzCliJson {
     return $commandText | ConvertFrom-Json
 }
 
+function Resolve-BooleanEnvironmentValue {
+    [CmdletBinding()]
+    param(
+        [string]$Value,
+        [bool]$Default = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Default
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        '1' { return $true }
+        'true' { return $true }
+        'yes' { return $true }
+        'y' { return $true }
+        'on' { return $true }
+        '0' { return $false }
+        'false' { return $false }
+        'no' { return $false }
+        'n' { return $false }
+        'off' { return $false }
+        default { throw "Unable to interpret boolean value '$Value'." }
+    }
+}
+
 function Resolve-StorageAccountName {
     [CmdletBinding()]
     param(
@@ -87,6 +117,58 @@ function Resolve-StorageAccountName {
     return [string]$storageAccounts[0]
 }
 
+function Invoke-HostedSurfaceProbe {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Uri,
+        [int[]]$ExpectedStatusCodes = @(200),
+        [int]$MaxAttempts = 6
+    )
+
+    $lastStatusCode = $null
+    for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+        $handler = [System.Net.Http.HttpClientHandler]::new()
+        $handler.AllowAutoRedirect = $false
+        $client = [System.Net.Http.HttpClient]::new($handler)
+        $client.Timeout = [TimeSpan]::FromSeconds(30)
+        $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $Uri)
+        $response = $null
+
+        try {
+            $response = $client.Send($request)
+            $lastStatusCode = [int]$response.StatusCode
+        }
+        catch {
+            if ($_.Exception.PSObject.Properties.Match('StatusCode').Count -gt 0 -and $null -ne $_.Exception.StatusCode) {
+                $lastStatusCode = [int]$_.Exception.StatusCode
+            }
+            else {
+                throw
+            }
+        }
+        finally {
+            if ($null -ne $response) {
+                $response.Dispose()
+            }
+
+            $request.Dispose()
+            $client.Dispose()
+            $handler.Dispose()
+        }
+
+        if ($lastStatusCode -in $ExpectedStatusCodes) {
+            return $lastStatusCode
+        }
+
+        if ($attempt -lt $MaxAttempts) {
+            Start-Sleep -Seconds (10 * $attempt)
+        }
+    }
+
+    throw "Hosted surface probe for '$Uri' returned status code '$lastStatusCode'. Expected one of: $($ExpectedStatusCodes -join ', ')."
+}
+
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
 if (-not $mode.RequiresHostedSurface) {
     throw 'WEB_KIND must be containerapp to publish or validate the hosted surface.'
@@ -100,14 +182,30 @@ if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI (az) is required for hosted surface publish.'
 }
 
+$resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {
+    [bool]$SkipAuthSetup
+}
+else {
+    Resolve-BooleanEnvironmentValue -Value $env:SKIP_HOSTED_AUTH_SETUP -Default $false
+}
+
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName
-$templatePublishResult = @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
-    -StorageAccountName $resolvedStorageAccountName `
-    -RepositoryPath $RepositoryPath `
-    -RepositoryUrl $RepositoryUrl `
-    -Ref $Ref) | Where-Object {
-        $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
-    } | Select-Object -Last 1
+$templatePublishResult = if ($SkipTemplatePublish) {
+    [PSCustomObject]@{
+        StorageAccountName = $resolvedStorageAccountName
+        ContainerName = 'templates'
+        PublisherContract = 'prepublished'
+    }
+}
+else {
+    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+        -StorageAccountName $resolvedStorageAccountName `
+        -RepositoryPath $RepositoryPath `
+        -RepositoryUrl $RepositoryUrl `
+        -Ref $Ref) | Where-Object {
+            $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
+        } | Select-Object -Last 1
+}
 
 if ($null -eq $templatePublishResult) {
     throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
@@ -135,26 +233,38 @@ $result = [PSCustomObject]@{
     StorageAccountName = $resolvedStorageAccountName
     TemplatesContainerName = $templatePublishResult.ContainerName
     EffectivePackageMode = $mode.EffectivePackageMode
+    SkipAuthSetup = $resolvedSkipAuthSetup
 }
+
+$authResult = & (Join-Path $PSScriptRoot 'Set-HostedSurfaceAuth.ps1') `
+    -ResourceGroupName $ResourceGroupName `
+    -ContainerAppName $ContainerAppName `
+    -SecurityGroup $SecurityGroup `
+    -AppRegistrationDisplayName $AppRegistrationDisplayName `
+    -SkipAuthSetup:([bool]$resolvedSkipAuthSetup) `
+    -PlanOnly:([bool]$PlanOnly)
+
+$result | Add-Member -NotePropertyName AuthManagementMode -NotePropertyValue $authResult.AuthManagementMode
+$result | Add-Member -NotePropertyName HostedAuthEnabled -NotePropertyValue ([bool]$authResult.CurrentAuthEnabled)
+$result | Add-Member -NotePropertyName HostedAuthValidationExpectation -NotePropertyValue ([string]$authResult.ValidationExpectation)
+$result | Add-Member -NotePropertyName HostedAuthSecurityGroupId -NotePropertyValue ([string]$authResult.SecurityGroupId)
+$result | Add-Member -NotePropertyName HostedAuthSecurityGroupDisplayName -NotePropertyValue ([string]$authResult.SecurityGroupDisplayName)
+$result | Add-Member -NotePropertyName HostedAuthAccessScope -NotePropertyValue ([string]$authResult.AuthAccessScope)
+$result | Add-Member -NotePropertyName HostedAuthAppRegistrationClientId -NotePropertyValue ([string]$authResult.AppRegistrationClientId)
+$result | Add-Member -NotePropertyName HostedAuthAppRegistrationDisplayName -NotePropertyValue ([string]$authResult.AppRegistrationDisplayName)
 
 if ($PlanOnly) {
     $result
     return
 }
 
-$statusCode = $null
-try {
-    $response = Invoke-WebRequest -Uri $containerAppUrl -UseBasicParsing -TimeoutSec 30
-    $statusCode = [int]$response.StatusCode
+$expectedStatusCodes = switch ([string]$authResult.ValidationExpectation) {
+    'RedirectOrAuthChallenge' { @(301, 302, 303, 307, 308, 401, 403) }
+    'Anonymous200' { @(200) }
+    default { @(200, 301, 302, 303, 307, 308, 401, 403) }
 }
-catch {
-    if ($null -ne $_.Exception.Response) {
-        $statusCode = [int]$_.Exception.Response.StatusCode
-    }
-    else {
-        throw
-    }
-}
+
+$statusCode = Invoke-HostedSurfaceProbe -Uri $containerAppUrl -ExpectedStatusCodes $expectedStatusCodes
 
 $result | Add-Member -NotePropertyName HttpStatusCode -NotePropertyValue $statusCode
 $result
