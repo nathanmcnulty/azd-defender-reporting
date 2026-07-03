@@ -74,7 +74,7 @@ param instanceMemoryMb int = 2048
 @description('Container image for the hosted dashboard Container App.')
 param containerAppImage string = 'docker.io/library/caddy:alpine'
 
-@description('Optional Microsoft Entra object ID for the signed-in deployer that should receive storage data-plane access.')
+@description('Optional Microsoft Entra object ID for the deployer principal that should receive Storage Blob Data Contributor on the wrapper storage account for template upload, package upload, and SAS generation.')
 param deployerPrincipalId string = ''
 
 @description('Microsoft Entra principal type for deployerPrincipalId.')

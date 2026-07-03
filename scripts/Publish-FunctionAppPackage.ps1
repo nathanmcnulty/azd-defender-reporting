@@ -9,7 +9,8 @@ param(
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
     [string]$OutputPath = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\artifacts\function-app-package\defender-reporting-function-app.zip'),
     [string]$MetadataPath,
-    [switch]$BuildOnly
+    [switch]$BuildOnly,
+    [switch]$SkipTemplatePublish
 )
 
 Set-StrictMode -Version Latest
@@ -384,15 +385,24 @@ if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) {
 
 $releasedPackagePath = Stage-ReleasedPackage -SourcePackagePath $resolvedPackagePath
 $deploymentStorage = Get-FunctionAppDeploymentStorage -ResourceGroupName $ResourceGroupName -FunctionAppName $FunctionAppName
-$templatePublishResult = @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
-    -StorageAccountName $deploymentStorage.StorageAccountName `
-    -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
-        $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
-    } | Select-Object -Last 1
+    $templatePublishResult = if ($SkipTemplatePublish) {
+        [PSCustomObject]@{
+            StorageAccountName = $deploymentStorage.StorageAccountName
+            ContainerName = 'templates'
+            PublisherContract = 'prepublished'
+        }
+    }
+    else {
+        @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+            -StorageAccountName $deploymentStorage.StorageAccountName `
+            -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
+            $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
+        } | Select-Object -Last 1
+    }
 
-if ($null -eq $templatePublishResult) {
-    throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
-}
+    if ($null -eq $templatePublishResult) {
+        throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
+    }
 $packageUri = Publish-ReleasedPackageBlob `
     -StorageAccountName $deploymentStorage.StorageAccountName `
     -ContainerName $deploymentStorage.ContainerName `

@@ -95,14 +95,45 @@ function Set-DeployerPrincipalDefaults {
     }
 }
 
+function Resolve-BooleanEnvironmentSetting {
+    [CmdletBinding()]
+    param(
+        [string]$Value,
+        [bool]$Default = $false
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Value)) {
+        return $Default
+    }
+
+    switch ($Value.Trim().ToLowerInvariant()) {
+        '1' { return $true }
+        'true' { return $true }
+        'yes' { return $true }
+        'y' { return $true }
+        'on' { return $true }
+        '0' { return $false }
+        'false' { return $false }
+        'no' { return $false }
+        'n' { return $false }
+        'off' { return $false }
+        default { throw "Unable to interpret boolean value '$Value'." }
+    }
+}
+
 Set-ProcessAndAzdDefault -Name 'COMPUTE_KIND' -Value 'functionapp'
 Set-ProcessAndAzdDefault -Name 'WEB_KIND' -Value 'containerapp'
 Set-ProcessAndAzdDefault -Name 'DASHBOARD_PACKAGE_MODE' -Value 'auto'
+Set-ProcessAndAzdDefault -Name 'SKIP_HOSTED_AUTH_SETUP' -Value 'false'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REPO' -Value 'https://github.com/nathanmcnulty/defender-reporting.git'
 Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value 'main'
 Set-DeployerPrincipalDefaults
 
 $mode = & (Join-Path $scriptRoot 'Get-DeploymentMode.ps1')
+$resolvedSkipHostedAuthSetup = Resolve-BooleanEnvironmentSetting -Value ([Environment]::GetEnvironmentVariable('SKIP_HOSTED_AUTH_SETUP', 'Process')) -Default $false
+$hostedAuthSecurityGroup = [Environment]::GetEnvironmentVariable('HOSTED_AUTH_SECURITY_GROUP', 'Process')
+$deployerPrincipalId = [Environment]::GetEnvironmentVariable('DEPLOYER_PRINCIPAL_ID', 'Process')
+$deployerPrincipalType = [Environment]::GetEnvironmentVariable('DEPLOYER_PRINCIPAL_TYPE', 'Process')
 
 if ($CheckUpstreamPath -and -not [string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_PATH)) {
     $fullPath = [System.IO.Path]::GetFullPath($env:DEFENDER_REPORTING_PATH)
@@ -120,20 +151,35 @@ Write-Output "  Compute kind: $($mode.ComputeKind)"
 Write-Output "  Web kind: $($mode.WebKind)"
 Write-Output "  Requested package mode: $($mode.RequestedPackageMode)"
 Write-Output "  Effective package mode: $($mode.EffectivePackageMode)"
+Write-Output "  Skip hosted auth setup: $resolvedSkipHostedAuthSetup"
+Write-Output "  Hosted auth security group: $(if ([string]::IsNullOrWhiteSpace($hostedAuthSecurityGroup)) { '<not set>' } else { $hostedAuthSecurityGroup })"
 Write-Output "  Upstream repo: $($env:DEFENDER_REPORTING_REPO)"
 Write-Output "  Upstream ref: $($env:DEFENDER_REPORTING_REF)"
 Write-Output "  Upstream path override: $(if ([string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_PATH)) { '<none>' } else { [System.IO.Path]::GetFullPath($env:DEFENDER_REPORTING_PATH) })"
+Write-Output "  Deployer principal id: $(if ([string]::IsNullOrWhiteSpace($deployerPrincipalId)) { '<not set>' } else { $deployerPrincipalId })"
+Write-Output "  Deployer principal type: $(if ([string]::IsNullOrWhiteSpace($deployerPrincipalType)) { '<not set>' } else { $deployerPrincipalType })"
 Write-Output "  azd: $(if ($azdPath) { $azdPath } else { '<missing>' })"
 Write-Output "  az: $(if ($azPath) { $azPath } else { '<missing>' })"
+
+$shouldWarnAboutHostedAuth = $CommandName -in @('publish-deployment', 'predeploy', 'postdeploy')
+if ($shouldWarnAboutHostedAuth -and $mode.RequiresHostedSurface -and -not $resolvedSkipHostedAuthSetup -and [string]::IsNullOrWhiteSpace($hostedAuthSecurityGroup)) {
+    Write-Warning 'Hosted publish now defaults to Entra Easy Auth. Set HOSTED_AUTH_SECURITY_GROUP or pass -SecurityGroup, or opt out with SKIP_HOSTED_AUTH_SETUP=true / -SkipAuthSetup.'
+}
+
+Write-Output '  Publish RBAC note: template upload, package upload, and SAS generation use storage data-plane APIs. The signed-in principal or DEPLOYER_PRINCIPAL_ID needs Storage Blob Data Contributor on the wrapper storage account.'
 
 [PSCustomObject]@{
     ComputeKind = $mode.ComputeKind
     WebKind = $mode.WebKind
     RequestedPackageMode = $mode.RequestedPackageMode
     EffectivePackageMode = $mode.EffectivePackageMode
+    SkipHostedAuthSetup = $resolvedSkipHostedAuthSetup
+    HostedAuthSecurityGroup = $hostedAuthSecurityGroup
     UpstreamRepository = $env:DEFENDER_REPORTING_REPO
     UpstreamRef = $env:DEFENDER_REPORTING_REF
     UpstreamPath = $env:DEFENDER_REPORTING_PATH
+    DeployerPrincipalId = $deployerPrincipalId
+    DeployerPrincipalType = $deployerPrincipalType
     AzdPath = $azdPath
     AzPath = $azPath
 }

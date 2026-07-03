@@ -14,6 +14,12 @@ It currently validates:
 4. optional upstream Function App package build-only validation
 5. optional upstream Automation runbook build-only validation
 
+The wrapper publish entrypoint also supports a no-change planning pass:
+
+```powershell
+.\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg> -PlanOnly
+```
+
 You can also validate the real upstream Function App package integration when you have a local `defender-reporting` checkout:
 
 ```powershell
@@ -50,3 +56,7 @@ The repo now owns the upstream Function App and Automation build contracts, but 
 - the upstream Automation runbook contract still builds
 
 Optional live publish validation can now exercise the full Flex Consumption publish path, the Automation publish path, and the hosted Container App surface once a real Azure environment exists and the signed-in operator has blob data access to the wrapper storage account.
+
+## Deferred follow-up
+
+TODO: add CI coverage that validates the wrapper against the upstream Function App build contract, the upstream Automation runbook contract, and the documented template-publish contract (`build\Publish-DashboardTemplates.ps1`), including whatever metadata schema the template publisher eventually commits to while `azure\Upload-Templates.ps1` remains a compatibility wrapper.

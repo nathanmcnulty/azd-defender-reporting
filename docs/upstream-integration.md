@@ -48,8 +48,11 @@ The wrapper also expects the upstream repo to provide:
 
 - `build\azure\Build-Runbook.ps1`
 - generated runbook output at `azure\Invoke-DashboardPipeline.ps1`
-- `azure\Upload-Templates.ps1`
+- a template publish surface, preferably `build\Publish-DashboardTemplates.ps1`
+- `azure\Upload-Templates.ps1` as a compatibility wrapper until the build-layer template publisher is universally available
 
 `Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, uploads template assets through the upstream template uploader, and then publishes the generated runbook into the provisioned Automation Account runtime environment.
 
-`Publish-HostedSurface.ps1` reuses the same template-upload contract and then validates that the provisioned Container App host is reachable for hosted dashboard delivery.
+`Publish-TemplateAssets.ps1` now prefers the documented build-layer publisher when it exists and falls back to the Azure-layer compatibility script otherwise. When the build-layer publisher exposes `-MetadataPath`, the wrapper captures that manifest and surfaces it for diagnostics, but it does not yet enforce a required metadata schema.
+
+`Publish-HostedSurface.ps1` reuses the same template-publish contract, configures the hosted Container App Easy Auth path by default unless the operator explicitly opts out, and then validates that the provisioned Container App host is reachable for hosted dashboard delivery.
