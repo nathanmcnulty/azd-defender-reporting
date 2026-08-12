@@ -3,6 +3,16 @@
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+function Resolve-AbsolutePath {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path
+    )
+
+    return [System.IO.Path]::GetFullPath($Path)
+}
+
 function Get-TextFromProcessOutput {
     [CmdletBinding()]
     param(
@@ -219,6 +229,80 @@ function Resolve-BooleanString {
     }
 }
 
+function Assert-ObjectFields {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        $InputObject,
+        [Parameter(Mandatory = $true)]
+        [string[]]$FieldNames,
+        [string]$Description = 'Object'
+    )
+
+    foreach ($fieldName in $FieldNames) {
+        if ($InputObject.PSObject.Properties.Match($fieldName).Count -eq 0) {
+            throw "$Description is missing required field '$fieldName'."
+        }
+
+        $value = $InputObject.$fieldName
+        if ($null -eq $value -or ($value -is [string] -and [string]::IsNullOrWhiteSpace($value))) {
+            throw "$Description field '$fieldName' is empty."
+        }
+    }
+}
+
+function Get-UpstreamCompatibilityLock {
+    [CmdletBinding()]
+    param(
+        [string]$LockPath = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'contracts\upstream-lock.json')
+    )
+
+    $resolvedLockPath = Resolve-AbsolutePath -Path $LockPath
+    if (-not (Test-Path -LiteralPath $resolvedLockPath -PathType Leaf)) {
+        throw "Upstream compatibility lock was not found: $resolvedLockPath"
+    }
+
+    $lock = Get-Content -LiteralPath $resolvedLockPath -Raw | ConvertFrom-Json -Depth 20
+    Assert-ObjectFields -InputObject $lock -FieldNames @('schemaVersion', 'repository', 'ref', 'commit', 'contracts') -Description 'Upstream compatibility lock'
+    if ([int]$lock.schemaVersion -ne 1) {
+        throw "Unsupported upstream compatibility lock schemaVersion '$($lock.schemaVersion)'."
+    }
+
+    return $lock
+}
+
+function Get-HostedAssetsContract {
+    [CmdletBinding()]
+    param(
+        [string]$ContractPath = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) 'contracts\hosted-assets.json')
+    )
+
+    $resolvedContractPath = Resolve-AbsolutePath -Path $ContractPath
+    if (-not (Test-Path -LiteralPath $resolvedContractPath -PathType Leaf)) {
+        throw "Hosted assets contract was not found: $resolvedContractPath"
+    }
+
+    $contract = Get-Content -LiteralPath $resolvedContractPath -Raw | ConvertFrom-Json -Depth 20
+    Assert-ObjectFields -InputObject $contract -FieldNames @('schemaVersion', 'dashboardBlobNames', 'hostedAssetsDirectory', 'assets') -Description 'Hosted assets contract'
+    if ([int]$contract.schemaVersion -ne 1) {
+        throw "Unsupported hosted assets contract schemaVersion '$($contract.schemaVersion)'."
+    }
+
+    $paths = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    foreach ($asset in @($contract.assets)) {
+        Assert-ObjectFields -InputObject $asset -FieldNames @('path', 'required') -Description 'Hosted asset entry'
+        $assetPath = [string]$asset.path
+        if ($assetPath -match '(^[\\/])|(^|[\\/])\.\.([\\/]|$)|\\') {
+            throw "Hosted asset path '$assetPath' is not a safe forward-slash relative path."
+        }
+        if (-not $paths.Add($assetPath)) {
+            throw "Hosted asset path '$assetPath' is duplicated."
+        }
+    }
+
+    return $contract
+}
+
 function Get-AzdEnvironmentValues {
     [CmdletBinding()]
     param()
@@ -343,4 +427,22 @@ function Resolve-SingleResourceNameInGroup {
     }
 
     return [string]$resourceNames[0]
+}
+
+function Resolve-StorageAccountName {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$ResourceGroupName,
+        [string]$RequestedStorageAccountName
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($RequestedStorageAccountName)) {
+        return $RequestedStorageAccountName
+    }
+
+    return Resolve-SingleResourceNameInGroup `
+        -ResourceGroupName $ResourceGroupName `
+        -ResourceType 'Microsoft.Storage/storageAccounts' `
+        -FriendlyName 'storage account'
 }

@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "dashboardBlobNames": {
+    "hosted": "VulnerabilityDashboard.Hosted.html",
+    "selfContained": "VulnerabilityDashboard.html"
+  },
+  "hostedAssetsDirectory": "VulnerabilityDashboard.Hosted.assets",
+  "assets": [
+    { "path": "runtime/dashboard.css", "required": true },
+    { "path": "runtime/dashboard.js", "required": true },
+    { "path": "runtime/pako.js", "required": true },
+    { "path": "vendor/chart.js", "required": true },
+    { "path": "data/summary.json", "required": true },
+    { "path": "optional/pdf-export.runtime.js", "required": false },
+    { "path": "optional/pdf-export.bundle.js", "required": false },
+    { "path": "data/payload.json.gz", "required": true }
+  ]
+}

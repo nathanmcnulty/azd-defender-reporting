@@ -7,22 +7,35 @@ This wrapper does not carry a copy of `defender-reporting`. Instead it resolves 
 `Resolve-UpstreamRepo.ps1` uses:
 
 1. `DEFENDER_REPORTING_PATH` when you already have a local checkout
-2. a local cache under `.local\upstream\defender-reporting`
-3. `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` to hydrate or refresh that cache
+2. explicit `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` overrides
+3. the tested repository, release, and full commit SHA in `contracts\upstream-lock.json`
+4. a local cache under `.local\upstream\defender-reporting`
 
 ## Defaults
 
 If not set, the wrapper defaults to:
 
 - `DEFENDER_REPORTING_REPO=https://github.com/nathanmcnulty/defender-reporting.git`
-- `DEFENDER_REPORTING_REF=main`
+- `DEFENDER_REPORTING_REF=v2026.07.13`
+- expected commit `28c68b4ea5521f834884a8f7aad9cfb38f1588b8`
+
+The resolver verifies the full commit when the default repository and ref are used. Explicit repository/ref overrides and local paths are supported for development, but are reported as not matching the compatibility lock when they resolve elsewhere.
 
 ## Why this wrapper uses a pinned-source model
 
 - It keeps this repo thin.
 - It avoids submodule churn while upstream is actively changing.
 - It gives local development a clean override path.
-- It makes later CI adoption straightforward because the wrapper can pin a specific ref.
+- It makes CI deterministic while retaining explicit development overrides.
+
+## Updating the lock
+
+`.github\workflows\update-upstream.yml` runs weekly and on demand. It resolves the latest upstream release, runs the complete wrapper compatibility suite against that checkout, updates the lock only after success, and opens a pull request. The same process can be run locally:
+
+```powershell
+.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release>       # test only
+.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release> -UpdateLock
+```
 
 ## Function App package contract
 
@@ -49,10 +62,12 @@ The wrapper also expects the upstream repo to provide:
 - `build\azure\Build-Runbook.ps1`
 - generated runbook output at `azure\Invoke-DashboardPipeline.ps1`
 - a template publish surface, preferably `build\Publish-DashboardTemplates.ps1`
-- `azure\Upload-Templates.ps1` as a compatibility wrapper until the build-layer template publisher is universally available
+- `build\Publish-DashboardTemplates.ps1` with `-MetadataPath`
 
-`Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, uploads template assets through the upstream template uploader, and then publishes the generated runbook into the provisioned Automation Account runtime environment.
+`Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, verifies its exact parameter set and shared-helper fingerprint, writes a wrapper-owned manifest under `.local\artifacts\automation-runbook`, uploads template assets, and publishes the generated runbook into the provisioned Automation Account runtime environment.
 
-`Publish-TemplateAssets.ps1` now prefers the documented build-layer publisher when it exists and falls back to the Azure-layer compatibility script otherwise. When the build-layer publisher exposes `-MetadataPath`, the wrapper captures that manifest and surfaces it for diagnostics, but it does not yet enforce a required metadata schema.
+`Publish-TemplateAssets.ps1` requires the documented build-layer publisher and validates its metadata schema, safe paths, file hashes, file count, and aggregate size before accepting publication.
 
 `Publish-HostedSurface.ps1` reuses the same template-publish contract, configures the hosted Container App Easy Auth path by default unless the operator explicitly opts out, and then validates that the provisioned Container App host is reachable for hosted dashboard delivery.
+
+`contracts\hosted-assets.json` is consumed by both PowerShell and Bicep. Validation compares its paths exactly with the upstream `hostedAssets` test contract. Container synchronization fails when a required asset is unavailable while optional PDF assets remain best effort.

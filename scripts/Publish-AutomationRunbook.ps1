@@ -15,70 +15,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
 $runtimeEnvironmentApiVersion = '2024-10-23'
 $automationAccountApiVersion = '2023-11-01'
 $runtimeEnvironmentName = 'PowerShell-74-AzAccounts'
 $runbookName = 'Invoke-DashboardPipeline'
 $dailyScheduleName = 'DashboardPipeline-Daily'
 $legacyWeeklyScheduleName = 'DashboardPipeline-Every7Days'
-
-function Get-TextFromProcessOutput {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [AllowEmptyCollection()]
-        [object[]]$Output = @()
-    )
-
-    if ($null -eq $Output -or $Output.Count -eq 0) {
-        return ''
-    }
-
-    return (($Output | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-            $_.Exception.Message
-        }
-        else {
-            [string]$_
-        }
-    }) -join [Environment]::NewLine).Trim()
-}
-
-function Get-AzCliJson {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    $commandOutput = @(az @Arguments 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0) {
-        throw $commandText
-    }
-
-    if ([string]::IsNullOrWhiteSpace($commandText)) {
-        return $null
-    }
-
-    return $commandText | ConvertFrom-Json
-}
-
-function Get-AzCliText {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    $commandOutput = @(az @Arguments 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0) {
-        throw $commandText
-    }
-
-    return $commandText
-}
 
 function Get-ErrorMessageText {
     [CmdletBinding()]
@@ -201,37 +145,6 @@ function Wait-WithPolling {
     throw "Timed out while waiting for $Description."
 }
 
-function Resolve-StorageAccountName {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ResourceGroupName,
-        [string]$RequestedStorageAccountName
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($RequestedStorageAccountName)) {
-        return $RequestedStorageAccountName
-    }
-
-    $storageAccounts = @(Get-AzCliJson -Arguments @(
-        'resource', 'list',
-        '--resource-group', $ResourceGroupName,
-        '--resource-type', 'Microsoft.Storage/storageAccounts',
-        '--query', '[].name',
-        '--output', 'json'
-    ))
-
-    if ($storageAccounts.Count -eq 0) {
-        throw "No storage account resources were found in resource group '$ResourceGroupName'."
-    }
-
-    if ($storageAccounts.Count -gt 1) {
-        throw "Multiple storage accounts were found in resource group '$ResourceGroupName'. Pass -StorageAccountName explicitly."
-    }
-
-    return [string]$storageAccounts[0]
-}
-
 function Get-DashboardDeliveryMode {
     [CmdletBinding()]
     param(
@@ -319,16 +232,76 @@ if (-not (Test-Path -LiteralPath $buildScriptPath -PathType Leaf)) {
 Write-Output ("Resolved upstream repo: {0} ({1})" -f $upstreamRepo.ResolvedPath, $upstreamRepo.Commit)
 Write-Output ("Building Azure Automation runbook with upstream script: {0}" -f $buildScriptPath)
 
-& $buildScriptPath
+$buildOutput = @(& $buildScriptPath 2>&1)
+if (-not $?) {
+    throw (Get-TextFromProcessOutput -Output $buildOutput)
+}
+$buildOutput | Write-Output
 
 if (-not (Test-Path -LiteralPath $runbookScriptPath -PathType Leaf)) {
     throw "Expected generated runbook artifact was not found: $runbookScriptPath"
+}
+
+$sharedHelpersFingerprintLine = $buildOutput | ForEach-Object { [string]$_ } | Where-Object { $_ -match '^Runbook shared-helper fingerprint:\s*([a-fA-F0-9]{64})$' } | Select-Object -Last 1
+if ($null -eq $sharedHelpersFingerprintLine) {
+    throw 'The upstream runbook build did not emit the required shared-helper fingerprint.'
+}
+$sharedHelpersFingerprint = [regex]::Match($sharedHelpersFingerprintLine, '([a-fA-F0-9]{64})$').Groups[1].Value.ToLowerInvariant()
+
+$tokens = $null
+$parseErrors = $null
+$runbookAst = [System.Management.Automation.Language.Parser]::ParseFile($runbookScriptPath, [ref]$tokens, [ref]$parseErrors)
+if ($parseErrors.Count -gt 0) {
+    throw "Generated runbook failed PowerShell parsing: $($parseErrors[0].Message)"
+}
+
+$requiredParameters = @('StorageAccountName', 'DashboardDeliveryMode', 'IncludeAdvancedHunting', 'UseExistingExportsOnly', 'UseDirectMergeDeviceLookup', 'Export')
+$actualParameters = @($runbookAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
+if (@(Compare-Object -ReferenceObject $requiredParameters -DifferenceObject $actualParameters).Count -gt 0) {
+    throw "Generated runbook parameter contract mismatch. Expected: $($requiredParameters -join ', '). Actual: $($actualParameters -join ', ')."
+}
+
+$runbookFile = Get-Item -LiteralPath $runbookScriptPath
+$runbookSha256 = (Get-FileHash -LiteralPath $runbookScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$manifestDirectory = Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\artifacts\automation-runbook'
+New-Item -Path $manifestDirectory -ItemType Directory -Force | Out-Null
+$manifestPath = Join-Path $manifestDirectory 'Invoke-DashboardPipeline.ps1.manifest.json'
+$manifest = [ordered]@{
+    schemaVersion = 1
+    generatedOnUtc = [datetime]::UtcNow.ToString('o')
+    repository = $upstreamRepo.RepositoryUrl
+    ref = $upstreamRepo.Ref
+    commit = $upstreamRepo.Commit
+    runbookPath = $runbookScriptPath
+    runbookSha256 = $runbookSha256
+    runbookSizeBytes = [int64]$runbookFile.Length
+    sharedHelpersFingerprint = $sharedHelpersFingerprint
+    parameters = $actualParameters
+}
+$manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
+$validatedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 10
+Assert-ObjectFields -InputObject $validatedManifest -FieldNames @(
+    'schemaVersion',
+    'repository',
+    'ref',
+    'commit',
+    'runbookPath',
+    'runbookSha256',
+    'runbookSizeBytes',
+    'sharedHelpersFingerprint',
+    'parameters'
+) -Description 'Automation runbook manifest'
+if ([string]$validatedManifest.runbookSha256 -ne $runbookSha256 -or [int64]$validatedManifest.runbookSizeBytes -ne [int64]$runbookFile.Length) {
+    throw 'Automation runbook manifest does not match the generated runbook artifact.'
 }
 
 $result = [PSCustomObject]@{
     UpstreamRepositoryPath = $upstreamRepo.ResolvedPath
     UpstreamCommit = $upstreamRepo.Commit
     RunbookScriptPath = $runbookScriptPath
+    RunbookManifestPath = $manifestPath
+    RunbookSha256 = $runbookSha256
+    SharedHelpersFingerprint = $sharedHelpersFingerprint
     RunbookName = $runbookName
     RuntimeEnvironmentName = $runtimeEnvironmentName
     DashboardDeliveryMode = $dashboardDeliveryMode

@@ -21,40 +21,6 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
 
-function Resolve-StorageAccountName {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ResourceGroupName,
-        [string]$RequestedStorageAccountName
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($RequestedStorageAccountName)) {
-        return $RequestedStorageAccountName
-    }
-
-    $storageAccounts = @(
-        Get-AzCliJson -Arguments @(
-            'resource', 'list',
-            '--resource-group', $ResourceGroupName,
-            '--resource-type', 'Microsoft.Storage/storageAccounts',
-            '--query', '[].name',
-            '--output', 'json'
-        )
-    ) | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) }
-    $storageAccounts = @($storageAccounts)
-
-    if ($storageAccounts.Count -eq 0) {
-        throw "No storage account resources were found in resource group '$ResourceGroupName'."
-    }
-
-    if ($storageAccounts.Count -gt 1) {
-        throw "Multiple storage accounts were found in resource group '$ResourceGroupName': $($storageAccounts -join ', '). Pass -StorageAccountName explicitly."
-    }
-
-    return [string]$storageAccounts[0]
-}
-
 function Resolve-ResourceGroupName {
     [CmdletBinding()]
     param(

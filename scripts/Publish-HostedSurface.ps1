@@ -18,104 +18,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-TextFromProcessOutput {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [AllowEmptyCollection()]
-        [object[]]$Output = @()
-    )
-
-    if ($null -eq $Output -or $Output.Count -eq 0) {
-        return ''
-    }
-
-    return (($Output | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-            $_.Exception.Message
-        }
-        else {
-            [string]$_
-        }
-    }) -join [Environment]::NewLine).Trim()
-}
-
-function Get-AzCliJson {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    $commandOutput = @(az @Arguments 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0) {
-        throw $commandText
-    }
-
-    if ([string]::IsNullOrWhiteSpace($commandText)) {
-        return $null
-    }
-
-    return $commandText | ConvertFrom-Json
-}
-
-function Resolve-BooleanEnvironmentValue {
-    [CmdletBinding()]
-    param(
-        [string]$Value,
-        [bool]$Default = $false
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $Default
-    }
-
-    switch ($Value.Trim().ToLowerInvariant()) {
-        '1' { return $true }
-        'true' { return $true }
-        'yes' { return $true }
-        'y' { return $true }
-        'on' { return $true }
-        '0' { return $false }
-        'false' { return $false }
-        'no' { return $false }
-        'n' { return $false }
-        'off' { return $false }
-        default { throw "Unable to interpret boolean value '$Value'." }
-    }
-}
-
-function Resolve-StorageAccountName {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$ResourceGroupName,
-        [string]$RequestedStorageAccountName
-    )
-
-    if (-not [string]::IsNullOrWhiteSpace($RequestedStorageAccountName)) {
-        return $RequestedStorageAccountName
-    }
-
-    $storageAccounts = @(Get-AzCliJson -Arguments @(
-        'resource', 'list',
-        '--resource-group', $ResourceGroupName,
-        '--resource-type', 'Microsoft.Storage/storageAccounts',
-        '--query', '[].name',
-        '--output', 'json'
-    ))
-
-    if ($storageAccounts.Count -eq 0) {
-        throw "No storage account resources were found in resource group '$ResourceGroupName'."
-    }
-
-    if ($storageAccounts.Count -gt 1) {
-        throw "Multiple storage accounts were found in resource group '$ResourceGroupName'. Pass -StorageAccountName explicitly."
-    }
-
-    return [string]$storageAccounts[0]
-}
+. (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
 
 function Invoke-HostedSurfaceProbe {
     [CmdletBinding()]
@@ -186,7 +89,7 @@ $resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {
     [bool]$SkipAuthSetup
 }
 else {
-    Resolve-BooleanEnvironmentValue -Value $env:SKIP_HOSTED_AUTH_SETUP -Default $false
+    Resolve-BooleanString -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
 }
 
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName

@@ -16,6 +16,8 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
+. (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
 $requiredManifestFields = @(
     'packagePath',
     'packageSha256',
@@ -27,16 +29,6 @@ $requiredManifestFields = @(
 
 $releasedPackageFileName = 'released-package.zip'
 
-function Resolve-AbsolutePath {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
-
 function Get-DefaultMetadataPath {
     [CmdletBinding()]
     param(
@@ -47,48 +39,6 @@ function Get-DefaultMetadataPath {
     $directory = Split-Path -Path $PackagePath -Parent
     $baseName = [System.IO.Path]::GetFileNameWithoutExtension($PackagePath)
     return Join-Path $directory ($baseName + '.manifest.json')
-}
-
-function Get-TextFromProcessOutput {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [AllowEmptyCollection()]
-        [object[]]$Output = @()
-    )
-
-    if ($null -eq $Output -or $Output.Count -eq 0) {
-        return ''
-    }
-
-    return (($Output | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-            $_.Exception.Message
-        }
-        else {
-            [string]$_
-        }
-    }) -join [Environment]::NewLine).Trim()
-}
-
-function Get-AzCliJson {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string[]]$Arguments
-    )
-
-    $commandOutput = @(az @Arguments 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0) {
-        throw $commandText
-    }
-
-    if ([string]::IsNullOrWhiteSpace($commandText)) {
-        return $null
-    }
-
-    return $commandText | ConvertFrom-Json
 }
 
 function Assert-ManifestField {
@@ -385,24 +335,24 @@ if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) {
 
 $releasedPackagePath = Stage-ReleasedPackage -SourcePackagePath $resolvedPackagePath
 $deploymentStorage = Get-FunctionAppDeploymentStorage -ResourceGroupName $ResourceGroupName -FunctionAppName $FunctionAppName
-    $templatePublishResult = if ($SkipTemplatePublish) {
-        [PSCustomObject]@{
-            StorageAccountName = $deploymentStorage.StorageAccountName
-            ContainerName = 'templates'
-            PublisherContract = 'prepublished'
-        }
+$templatePublishResult = if ($SkipTemplatePublish) {
+    [PSCustomObject]@{
+        StorageAccountName = $deploymentStorage.StorageAccountName
+        ContainerName = 'templates'
+        PublisherContract = 'prepublished'
     }
-    else {
-        @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
-            -StorageAccountName $deploymentStorage.StorageAccountName `
-            -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
-            $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
-        } | Select-Object -Last 1
-    }
+}
+else {
+    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+        -StorageAccountName $deploymentStorage.StorageAccountName `
+        -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
+        $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
+    } | Select-Object -Last 1
+}
 
-    if ($null -eq $templatePublishResult) {
-        throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
-    }
+if ($null -eq $templatePublishResult) {
+    throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
+}
 $packageUri = Publish-ReleasedPackageBlob `
     -StorageAccountName $deploymentStorage.StorageAccountName `
     -ContainerName $deploymentStorage.ContainerName `
