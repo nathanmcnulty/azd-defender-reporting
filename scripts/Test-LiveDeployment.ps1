@@ -113,8 +113,29 @@ if ($mode.RequiresHostedSurface) {
     if (-not [string]::IsNullOrWhiteSpace($AccessToken)) {
         $headers.Authorization = "Bearer $AccessToken"
     }
-    $response = Invoke-WebRequest -Uri $uri -Headers $headers -MaximumRedirection 0 -SkipHttpErrorCheck
-    $statusCode = [int]$response.StatusCode
+    $handler = [System.Net.Http.HttpClientHandler]::new()
+    $handler.AllowAutoRedirect = $false
+    $client = [System.Net.Http.HttpClient]::new($handler)
+    $request = [System.Net.Http.HttpRequestMessage]::new([System.Net.Http.HttpMethod]::Get, $uri)
+    $response = $null
+    try {
+        foreach ($header in $headers.GetEnumerator()) {
+            $request.Headers.TryAddWithoutValidation([string]$header.Key, [string]$header.Value) | Out-Null
+        }
+
+        $response = $client.Send($request)
+        $statusCode = [int]$response.StatusCode
+        $responseContent = if ($null -eq $response.Content) { '' } else { $response.Content.ReadAsStringAsync().GetAwaiter().GetResult() }
+    }
+    finally {
+        if ($null -ne $response) {
+            $response.Dispose()
+        }
+
+        $request.Dispose()
+        $client.Dispose()
+        $handler.Dispose()
+    }
     if ([string]::IsNullOrWhiteSpace($AccessToken)) {
         if ($statusCode -notin @(200, 301, 302, 303, 307, 308, 401, 403)) {
             throw "Hosted surface returned unexpected HTTP status $statusCode."
@@ -124,7 +145,7 @@ if ($mode.RequiresHostedSurface) {
         if ($statusCode -ne 200) {
             throw "Authenticated hosted surface returned HTTP status $statusCode."
         }
-        if ([string]$response.Content -match 'The dashboard has not been generated yet') {
+        if ($responseContent -match 'The dashboard has not been generated yet') {
             throw 'Authenticated hosted surface is still serving the placeholder dashboard.'
         }
     }
