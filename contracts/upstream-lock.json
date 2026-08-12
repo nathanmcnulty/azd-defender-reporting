@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "repository": "https://github.com/nathanmcnulty/defender-reporting.git",
+  "ref": "v2026.07.13",
+  "commit": "28c68b4ea5521f834884a8f7aad9cfb38f1588b8",
+  "validatedOnUtc": "2026-08-12T03:22:51Z",
+  "contracts": {
+    "functionAppPackage": 1,
+    "automationRunbook": 1,
+    "dashboardTemplates": 1,
+    "hostedAssets": 1
+  }
+}

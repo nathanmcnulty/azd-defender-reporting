@@ -8,6 +8,7 @@ This repo is intentionally **not** a fork of the dashboard application. The upst
 - `infra/` Bicep provisioning
 - `scripts/` PowerShell validation, upstream resolution, and publish orchestration
 - wrapper-specific docs and deployment contracts
+- `contracts/` tested upstream release and hosted-asset contracts
 
 ## Current scope
 
@@ -65,7 +66,8 @@ Future `WebApp` hosting can be added by introducing a new web module and script 
 The wrapper resolves upstream source from either:
 
 1. `DEFENDER_REPORTING_PATH` for a local side-by-side checkout, or
-2. `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` for a pinned clone into local cache
+2. `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` for an explicit override, or
+3. the committed `contracts/upstream-lock.json` release and full commit SHA
 
 See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact behavior.
 
@@ -89,25 +91,27 @@ See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact b
    ```powershell
    azd env set COMPUTE_KIND automation
    azd env set WEB_KIND none
-   azd env set DEFENDER_REPORTING_REF main
+   azd env set DEFENDER_REPORTING_REF <explicit-release-or-sha>  # bypasses the tested default lock
    azd env set HOSTED_AUTH_SECURITY_GROUP "Dashboard Viewers"  # optional; omit for tenant-wide authenticated-user access
    ```
 
-4. Run the local wrapper validation.
+4. Validate, provision, publish, and optionally smoke test through the unified entrypoint.
 
    ```powershell
-   .\scripts\Validate-Repository.ps1
+   .\scripts\Deploy.ps1 -ResourceGroupName <rg>
+   .\scripts\Deploy.ps1 -ResourceGroupName <rg> -RunSmokeTest
    ```
 
-5. Provision infrastructure.
+   Preview infrastructure without provisioning or publishing:
+
+   ```powershell
+   .\scripts\Deploy.ps1 -PlanOnly
+   ```
+
+   The lower-level commands remain available for focused operations:
 
    ```powershell
    azd provision
-   ```
-
-6. Publish through the wrapper-owned orchestrator.
-
-   ```powershell
    .\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg>
    ```
 
@@ -141,20 +145,27 @@ Run the repo-owned validation entrypoint:
 .\scripts\Validate-Repository.ps1
 ```
 
-It currently validates:
+The complete locked-upstream suite is:
 
 - deployment-mode normalization
 - PowerShell script parsing
 - Bicep compilation through `az bicep build`
-- optional upstream Function App package build-only validation
-- optional upstream Automation runbook build-only validation
+- upstream Function App package manifest, hash, size, fingerprint, and staged-module contract
+- upstream Automation runbook parameters, hash, size, and shared-helper fingerprint contract
+- upstream dashboard template publisher parameter contract
+- exact hosted dashboard asset-set compatibility
 
 The publish entrypoint also supports a non-mutating plan mode:
 
 ```powershell
 .\scripts\Publish-Deployment.ps1 -ResourceGroupName <rg> -PlanOnly
+.\scripts\Deploy.ps1 -PlanOnly
 ```
 
-Optional deeper validation can also exercise the upstream Function App package contract when you point the wrapper at a local `defender-reporting` checkout.
+GitHub Actions runs this suite for pull requests, `main`, weekly schedules, and manual dispatch. A second workflow tests the latest upstream release before opening a lock-update pull request. The opt-in OIDC live-smoke workflow is enabled with the `AZURE_SMOKE_ENABLED=true` repository variable and validates storage artifacts, required hosted assets, and the hosted auth boundary.
+
+Protect `main` by requiring the **Validate wrapper contracts / validate** check, requiring pull requests and at least one approval, dismissing stale approvals, requiring conversations to be resolved, and preventing force pushes and branch deletion.
+
+For hosted Easy Auth, use a dedicated Entra application registration and security group. Assign at least two application owners, periodically review group membership, reuse the registration for the same environment rather than creating duplicates, and delete the registration plus environment-specific group when the deployment is permanently removed. `HOSTED_AUTH_SECURITY_GROUP` limits access to that group; omitting it allows any authenticated user in the tenant.
 
 See [docs/validation.md](docs/validation.md) for details.

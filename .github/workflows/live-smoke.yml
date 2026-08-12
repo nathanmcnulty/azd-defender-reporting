@@ -1,0 +1,40 @@
+name: Live Azure smoke test
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 6 * * 3'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  smoke:
+    if: ${{ vars.AZURE_SMOKE_ENABLED == 'true' }}
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      AZURE_ENV_NAME: smoke
+      AZURE_LOCATION: ${{ vars.AZURE_LOCATION }}
+      AZURE_RESOURCE_GROUP: ${{ vars.AZURE_SMOKE_RESOURCE_GROUP }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Install Azure Developer CLI
+        shell: pwsh
+        run: winget install Microsoft.Azd --silent --accept-package-agreements --accept-source-agreements
+      - name: Configure azd environment
+        shell: pwsh
+        run: |
+          azd auth login --client-id '${{ secrets.AZURE_CLIENT_ID }}' --tenant-id '${{ secrets.AZURE_TENANT_ID }}' --federated-credential-provider github
+          azd env new smoke --no-prompt 2>$null
+          azd env set AZURE_LOCATION $env:AZURE_LOCATION
+          azd env set AZURE_RESOURCE_GROUP $env:AZURE_RESOURCE_GROUP
+      - name: Deploy and smoke test
+        shell: pwsh
+        run: .\scripts\Deploy.ps1 -ResourceGroupName $env:AZURE_RESOURCE_GROUP -RunSmokeTest

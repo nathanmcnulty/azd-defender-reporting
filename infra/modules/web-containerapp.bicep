@@ -5,6 +5,7 @@ param image string
 param logAnalyticsWorkspaceName string
 param storageAccountName string
 param dashboardDeliveryMode string
+param hostedAssetsContract object
 
 resource logAnalyticsWorkspace 'Microsoft.OperationalInsights/workspaces@2023-09-01' existing = {
   name: logAnalyticsWorkspaceName
@@ -15,19 +16,11 @@ var usesHostedAssets = contains([
   'Dual'
 ], dashboardDeliveryMode)
 var storageDnsSuffix = environment().suffixes.storage
-var dashboardBlobName = usesHostedAssets ? 'VulnerabilityDashboard.Hosted.html' : 'VulnerabilityDashboard.html'
-var dashboardAssetsDirectoryName = usesHostedAssets ? 'VulnerabilityDashboard.Hosted.assets' : 'VulnerabilityDashboard.assets'
-var hostedAssetRelativePaths = [
-  'runtime/dashboard.css'
-  'runtime/dashboard.js'
-  'runtime/pako.js'
-  'vendor/chart.js'
-  'data/summary.json'
-  'optional/pdf-export.runtime.js'
-  'optional/pdf-export.bundle.js'
-  'data/payload.json.gz'
-]
-var assetDownloadLines = [for assetRelativePath in hostedAssetRelativePaths: '    download_blob /data/${dashboardAssetsDirectoryName}/${assetRelativePath} "${dashboardAssetsDirectoryName}/${assetRelativePath}" || true']
+var dashboardBlobName = usesHostedAssets ? hostedAssetsContract.dashboardBlobNames.hosted : hostedAssetsContract.dashboardBlobNames.selfContained
+var dashboardAssetsDirectoryName = hostedAssetsContract.hostedAssetsDirectory
+var assetDownloadLines = [for asset in hostedAssetsContract.assets: asset.required
+  ? '    download_blob /data/${dashboardAssetsDirectoryName}/${asset.path} "${dashboardAssetsDirectoryName}/${asset.path}" || return 1'
+  : '    download_blob /data/${dashboardAssetsDirectoryName}/${asset.path} "${dashboardAssetsDirectoryName}/${asset.path}" || true']
 var assetDownloadBlock = usesHostedAssets
   ? join(concat([
       '    mkdir -p "/data/${dashboardAssetsDirectoryName}"'

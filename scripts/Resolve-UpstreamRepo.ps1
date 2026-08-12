@@ -2,8 +2,8 @@
 
 [CmdletBinding()]
 param(
-    [string]$RepositoryUrl = $(if ([string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_REPO)) { 'https://github.com/nathanmcnulty/defender-reporting.git' } else { $env:DEFENDER_REPORTING_REPO }),
-    [string]$Ref = $(if ([string]::IsNullOrWhiteSpace($env:DEFENDER_REPORTING_REF)) { 'main' } else { $env:DEFENDER_REPORTING_REF }),
+    [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
+    [string]$Ref = $env:DEFENDER_REPORTING_REF,
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
     [string]$CacheRoot = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\upstream'),
     [switch]$UseExistingCacheOnly
@@ -11,6 +11,8 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+. (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
 
 function Invoke-GitCommand {
     [CmdletBinding()]
@@ -27,15 +29,9 @@ function Invoke-GitCommand {
     return ($output | Out-String).Trim()
 }
 
-function Resolve-AbsolutePath {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Path
-    )
-
-    return [System.IO.Path]::GetFullPath($Path)
-}
+$compatibilityLock = Get-UpstreamCompatibilityLock
+$RepositoryUrl = if ([string]::IsNullOrWhiteSpace($RepositoryUrl)) { [string]$compatibilityLock.repository } else { $RepositoryUrl }
+$Ref = if ([string]::IsNullOrWhiteSpace($Ref)) { [string]$compatibilityLock.ref } else { $Ref }
 
 if ([string]::IsNullOrWhiteSpace($RepositoryPath) -eq $false) {
     $resolvedPath = Resolve-AbsolutePath -Path $RepositoryPath
@@ -50,6 +46,7 @@ if ([string]::IsNullOrWhiteSpace($RepositoryPath) -eq $false) {
         ResolvedPath = $resolvedPath
         Commit = $commit
         Source = 'path-override'
+        MatchesCompatibilityLock = ($commit -eq [string]$compatibilityLock.commit)
     }
     return
 }
@@ -72,6 +69,9 @@ if (-not $UseExistingCacheOnly) {
 }
 
 $headCommit = Invoke-GitCommand -Arguments @('-C', $cachePath, 'rev-parse', 'HEAD')
+if ($RepositoryUrl -eq [string]$compatibilityLock.repository -and $Ref -eq [string]$compatibilityLock.ref -and $headCommit -ne [string]$compatibilityLock.commit) {
+    throw "Upstream ref '$Ref' resolved to '$headCommit', but the compatibility lock requires '$($compatibilityLock.commit)'."
+}
 
 [PSCustomObject]@{
     RepositoryUrl = $RepositoryUrl
@@ -79,5 +79,5 @@ $headCommit = Invoke-GitCommand -Arguments @('-C', $cachePath, 'rev-parse', 'HEA
     ResolvedPath = $cachePath
     Commit = $headCommit
     Source = 'local-cache'
+    MatchesCompatibilityLock = ($headCommit -eq [string]$compatibilityLock.commit)
 }
-

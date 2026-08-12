@@ -14,27 +14,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Path $PSCommandPath -Parent
 $repoRoot = Split-Path -Path $scriptRoot -Parent
 
-function Get-TextFromProcessOutput {
-    [CmdletBinding()]
-    param(
-        [AllowNull()]
-        [AllowEmptyCollection()]
-        [object[]]$Output = @()
-    )
-
-    if ($null -eq $Output -or $Output.Count -eq 0) {
-        return ''
-    }
-
-    return (($Output | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-            $_.Exception.Message
-        }
-        else {
-            [string]$_
-        }
-    }) -join [Environment]::NewLine).Trim()
-}
+. (Join-Path $scriptRoot 'Common-AzurePublish.ps1')
 
 function Set-ProcessAndAzdDefault {
     [CmdletBinding()]
@@ -117,93 +97,6 @@ function Set-DeployerPrincipalDefaults {
     }
 }
 
-function Resolve-BooleanEnvironmentSetting {
-    [CmdletBinding()]
-    param(
-        [string]$Value,
-        [bool]$Default = $false
-    )
-
-    if ([string]::IsNullOrWhiteSpace($Value)) {
-        return $Default
-    }
-
-    switch ($Value.Trim().ToLowerInvariant()) {
-        '1' { return $true }
-        'true' { return $true }
-        'yes' { return $true }
-        'y' { return $true }
-        'on' { return $true }
-        '0' { return $false }
-        'false' { return $false }
-        'no' { return $false }
-        'n' { return $false }
-        'off' { return $false }
-        default { throw "Unable to interpret boolean value '$Value'." }
-    }
-}
-
-function Get-AzdEnvironmentValues {
-    [CmdletBinding()]
-    param()
-
-    $cachedValues = Get-Variable -Name AzdEnvironmentValues -Scope Script -ErrorAction SilentlyContinue
-    if ($null -ne $cachedValues) {
-        return $script:AzdEnvironmentValues
-    }
-
-    $script:AzdEnvironmentValues = @{}
-    $azdCommand = Get-Command -Name 'azd' -ErrorAction SilentlyContinue
-    if ($null -eq $azdCommand) {
-        return $script:AzdEnvironmentValues
-    }
-
-    $commandOutput = @(& $azdCommand.Source env get-values 2>&1)
-    $commandText = Get-TextFromProcessOutput -Output $commandOutput
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($commandText)) {
-        return $script:AzdEnvironmentValues
-    }
-
-    foreach ($line in ($commandText -split "`r?`n")) {
-        if ($line -notmatch '^(?:export\s+)?([A-Za-z0-9_]+)=(.*)$') {
-            continue
-        }
-
-        $name = $Matches[1]
-        $rawValue = $Matches[2].Trim()
-        if ($rawValue.Length -ge 2) {
-            $quote = $rawValue[0]
-            if (($quote -eq '"' -or $quote -eq "'") -and $rawValue[-1] -eq $quote) {
-                $rawValue = $rawValue.Substring(1, $rawValue.Length - 2)
-            }
-        }
-
-        $script:AzdEnvironmentValues[$name] = $rawValue
-    }
-
-    return $script:AzdEnvironmentValues
-}
-
-function Get-EnvironmentValue {
-    [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Name
-    )
-
-    $processValue = [Environment]::GetEnvironmentVariable($Name, 'Process')
-    if (-not [string]::IsNullOrWhiteSpace($processValue)) {
-        return $processValue
-    }
-
-    $azdValues = Get-AzdEnvironmentValues
-    if ($azdValues.ContainsKey($Name) -and -not [string]::IsNullOrWhiteSpace([string]$azdValues[$Name])) {
-        return [string]$azdValues[$Name]
-    }
-
-    return $null
-}
-
 function Import-AzdEnvironmentValue {
     [CmdletBinding()]
     param(
@@ -282,8 +175,9 @@ Set-ProcessAndAzdDefault -Name 'COMPUTE_KIND' -Value 'functionapp'
 Set-ProcessAndAzdDefault -Name 'WEB_KIND' -Value 'containerapp'
 Set-ProcessAndAzdDefault -Name 'DASHBOARD_PACKAGE_MODE' -Value 'auto'
 Set-ProcessAndAzdDefault -Name 'SKIP_HOSTED_AUTH_SETUP' -Value 'false'
-Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REPO' -Value 'https://github.com/nathanmcnulty/defender-reporting.git'
-Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value 'main'
+$compatibilityLock = Get-UpstreamCompatibilityLock
+Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REPO' -Value ([string]$compatibilityLock.repository)
+Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value ([string]$compatibilityLock.ref)
 
 @(
     'AZURE_RESOURCE_GROUP',
@@ -305,7 +199,7 @@ Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value 'main'
 Set-DeployerPrincipalDefaults
 
 $mode = & (Join-Path $scriptRoot 'Get-DeploymentMode.ps1')
-$resolvedSkipHostedAuthSetup = Resolve-BooleanEnvironmentSetting -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
+$resolvedSkipHostedAuthSetup = Resolve-BooleanString -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
 $hostedAuthSecurityGroup = Resolve-HostedAuthSecurityGroupSetting `
     -CurrentValue (Get-EnvironmentValue -Name 'HOSTED_AUTH_SECURITY_GROUP') `
     -RequiresHostedSurface ([bool]$mode.RequiresHostedSurface) `

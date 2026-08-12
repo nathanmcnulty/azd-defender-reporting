@@ -1,0 +1,46 @@
+name: Test latest upstream release
+
+on:
+  schedule:
+    - cron: '41 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  update:
+    runs-on: windows-latest
+    timeout-minutes: 40
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Install Bicep CLI
+        shell: pwsh
+        run: az bicep install
+      - name: Test and record latest compatible release
+        id: candidate
+        shell: pwsh
+        run: .\scripts\Update-UpstreamLock.ps1 -UpdateLock
+      - name: Create compatibility update pull request
+        if: ${{ !cancelled() }}
+        shell: pwsh
+        run: |
+          if (-not (git status --porcelain -- contracts/upstream-lock.json)) { exit 0 }
+          $lock = Get-Content .\contracts\upstream-lock.json -Raw | ConvertFrom-Json
+          $branch = "automation/upstream-$($lock.ref)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B $branch
+          git add contracts/upstream-lock.json
+          git commit -m "Update compatible upstream to $($lock.ref)"
+          git push --force-with-lease origin $branch
+          $existing = gh pr list --head $branch --json number --jq '.[0].number'
+          if (-not $existing) {
+            gh pr create --base main --head $branch --title "Update compatible upstream to $($lock.ref)" --body "Automated compatibility validation passed for upstream $($lock.ref) at $($lock.commit)."
+          }

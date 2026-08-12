@@ -10,63 +10,7 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-function Get-AzdEnvironmentValues {
-    [CmdletBinding()]
-    param()
-
-    $script:cachedAzdValues = if (Get-Variable -Name cachedAzdValues -Scope Script -ErrorAction SilentlyContinue) {
-        $script:cachedAzdValues
-    }
-    else {
-        $null
-    }
-
-    if ($null -ne $script:cachedAzdValues) {
-        return $script:cachedAzdValues
-    }
-
-    $script:cachedAzdValues = @{}
-    $azdCommand = Get-Command -Name 'azd' -ErrorAction SilentlyContinue
-    if ($null -eq $azdCommand) {
-        return $script:cachedAzdValues
-    }
-
-    $commandOutput = @(& $azdCommand.Source env get-values 2>&1)
-    if ($LASTEXITCODE -ne 0) {
-        return $script:cachedAzdValues
-    }
-
-    $commandText = (($commandOutput | ForEach-Object {
-        if ($_ -is [System.Management.Automation.ErrorRecord]) {
-            $_.Exception.Message
-        }
-        else {
-            [string]$_
-        }
-    }) -join [Environment]::NewLine).Trim()
-    if ([string]::IsNullOrWhiteSpace($commandText)) {
-        return $script:cachedAzdValues
-    }
-
-    foreach ($line in ($commandText -split "`r?`n")) {
-        if ($line -notmatch '^(?:export\s+)?([A-Za-z0-9_]+)=(.*)$') {
-            continue
-        }
-
-        $name = $Matches[1]
-        $rawValue = $Matches[2].Trim()
-        if ($rawValue.Length -ge 2) {
-            $quote = $rawValue[0]
-            if (($quote -eq '"' -or $quote -eq "'") -and $rawValue[-1] -eq $quote) {
-                $rawValue = $rawValue.Substring(1, $rawValue.Length - 2)
-            }
-        }
-
-        $script:cachedAzdValues[$name] = $rawValue
-    }
-
-    return $script:cachedAzdValues
-}
+. (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
 
 function Get-ConfigurationValue {
     [CmdletBinding()]

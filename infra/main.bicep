@@ -96,6 +96,7 @@ var resolvedDashboardPackageMode = dashboardPackageMode == 'auto'
 var functionRuntimeDashboardDeliveryMode = resolvedDashboardPackageMode == 'hosted'
   ? 'Hosted'
   : (resolvedDashboardPackageMode == 'dual' ? 'Dual' : 'SelfContained')
+var hostedAssetsContract = loadJsonContent('../contracts/hosted-assets.json')
 
 module storage 'modules/core-storage.bicep' = {
   name: 'storage'
@@ -182,6 +183,7 @@ module containerApp 'modules/web-containerapp.bicep' = if (webKind == 'container
     logAnalyticsWorkspaceName: workspaceName
     storageAccountName: storage.outputs.name
     dashboardDeliveryMode: functionRuntimeDashboardDeliveryMode
+    hostedAssetsContract: hostedAssetsContract
   }
 }
 
