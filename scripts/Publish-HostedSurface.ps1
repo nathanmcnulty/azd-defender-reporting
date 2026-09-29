@@ -30,6 +30,7 @@ function Invoke-HostedSurfaceProbe {
     )
 
     $lastStatusCode = $null
+    $lastProbeError = $null
     for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
         $handler = [System.Net.Http.HttpClientHandler]::new()
         $handler.AllowAutoRedirect = $false
@@ -41,13 +42,15 @@ function Invoke-HostedSurfaceProbe {
         try {
             $response = $client.Send($request)
             $lastStatusCode = [int]$response.StatusCode
+            $lastProbeError = $null
         }
         catch {
             if ($_.Exception.PSObject.Properties.Match('StatusCode').Count -gt 0 -and $null -ne $_.Exception.StatusCode) {
                 $lastStatusCode = [int]$_.Exception.StatusCode
             }
             else {
-                throw
+                $lastStatusCode = $null
+                $lastProbeError = $_.Exception.Message
             }
         }
         finally {
@@ -69,7 +72,8 @@ function Invoke-HostedSurfaceProbe {
         }
     }
 
-    throw "Hosted surface probe for '$Uri' returned status code '$lastStatusCode'. Expected one of: $($ExpectedStatusCodes -join ', ')."
+    $lastOutcome = if ($null -ne $lastStatusCode) { "status code '$lastStatusCode'" } else { "error '$lastProbeError'" }
+    throw "Hosted surface probe for '$Uri' returned $lastOutcome. Expected one of: $($ExpectedStatusCodes -join ', ')."
 }
 
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
