@@ -10,6 +10,7 @@ param(
     [string]$OutputPath = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\artifacts\function-app-package\defender-reporting-function-app.zip'),
     [string]$MetadataPath,
     [switch]$BuildOnly,
+    [switch]$RebuildFromSource,
     [switch]$SkipTemplatePublish
 )
 
@@ -102,10 +103,12 @@ function Stage-ReleasedPackage {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
-        [string]$SourcePackagePath
+        [string]$SourcePackagePath,
+        [string]$DestinationDirectory = (Split-Path -Path $SourcePackagePath -Parent)
     )
 
-    $stagedPackagePath = Join-Path (Split-Path -Path $SourcePackagePath -Parent) $releasedPackageFileName
+    New-Item -Path $DestinationDirectory -ItemType Directory -Force | Out-Null
+    $stagedPackagePath = Join-Path $DestinationDirectory $releasedPackageFileName
     if ((Resolve-AbsolutePath -Path $SourcePackagePath) -ne (Resolve-AbsolutePath -Path $stagedPackagePath)) {
         Copy-Item -LiteralPath $SourcePackagePath -Destination $stagedPackagePath -Force
     }
@@ -271,29 +274,37 @@ $upstreamRepo = & (Join-Path $PSScriptRoot 'Resolve-UpstreamRepo.ps1') `
     -Ref $Ref `
     -RepositoryPath $RepositoryPath
 
-$buildScriptPath = Join-Path $upstreamRepo.ResolvedPath 'build\Build-FunctionAppPackage.ps1'
-if (-not (Test-Path -LiteralPath $buildScriptPath -PathType Leaf)) {
-    throw "Required upstream package script was not found: $buildScriptPath"
+$useReleasedPackage = $upstreamRepo.Source -eq 'bundled-release' -and -not $RebuildFromSource
+if ($useReleasedPackage) {
+    $repoRoot = Split-Path $PSScriptRoot -Parent
+    $resolvedMetadataPath = Join-Path $repoRoot 'contracts\released-function-app.json'
+    $manifest = Get-Content -LiteralPath $resolvedMetadataPath -Raw -ErrorAction Stop | ConvertFrom-Json
+    if ([string]$manifest.sourceCommit -ne [string]$upstreamRepo.Commit -or [int]$manifest.schemaVersion -ne 1 -or
+        [string]$manifest.packagePath -ne 'vendor/function-app-package.zip') {
+        throw 'Released Function App package metadata does not match the bundled source lock.'
+    }
+    $resolvedPackagePath = Join-Path $repoRoot ([string]$manifest.packagePath)
+    Write-Output ("Using SHA-256-locked Function App release package for upstream commit {0}." -f $upstreamRepo.Commit)
 }
-
-Write-Output ("Resolved upstream repo: {0} ({1})" -f $upstreamRepo.ResolvedPath, $upstreamRepo.Commit)
-Write-Output ("Building Function App package with upstream script: {0}" -f $buildScriptPath)
-
-New-Item -Path (Split-Path -Path $resolvedOutputPath -Parent) -ItemType Directory -Force | Out-Null
-New-Item -Path (Split-Path -Path $resolvedMetadataPath -Parent) -ItemType Directory -Force | Out-Null
-
-& $buildScriptPath -OutputPath $resolvedOutputPath -MetadataPath $resolvedMetadataPath
-
-if (-not (Test-Path -LiteralPath $resolvedMetadataPath -PathType Leaf)) {
-    throw "Upstream package manifest was not created: $resolvedMetadataPath"
+else {
+    $buildScriptPath = Join-Path $upstreamRepo.ResolvedPath 'build\Build-FunctionAppPackage.ps1'
+    if (-not (Test-Path -LiteralPath $buildScriptPath -PathType Leaf)) {
+        throw "Required upstream package script was not found: $buildScriptPath"
+    }
+    Write-Output ("Resolved upstream repo: {0} ({1})" -f $upstreamRepo.ResolvedPath, $upstreamRepo.Commit)
+    Write-Output ("Building Function App package with upstream script: {0}" -f $buildScriptPath)
+    New-Item -Path (Split-Path -Path $resolvedOutputPath -Parent) -ItemType Directory -Force | Out-Null
+    New-Item -Path (Split-Path -Path $resolvedMetadataPath -Parent) -ItemType Directory -Force | Out-Null
+    & $buildScriptPath -OutputPath $resolvedOutputPath -MetadataPath $resolvedMetadataPath
+    if (-not (Test-Path -LiteralPath $resolvedMetadataPath -PathType Leaf)) {
+        throw "Upstream package manifest was not created: $resolvedMetadataPath"
+    }
+    $manifest = Get-Content -LiteralPath $resolvedMetadataPath -Raw | ConvertFrom-Json
+    $resolvedPackagePath = Resolve-AbsolutePath -Path ([string]$manifest.packagePath)
 }
-
-$manifest = Get-Content -LiteralPath $resolvedMetadataPath -Raw | ConvertFrom-Json
 foreach ($field in $requiredManifestFields) {
     Assert-ManifestField -Manifest $manifest -FieldName $field
 }
-
-$resolvedPackagePath = Resolve-AbsolutePath -Path ([string]$manifest.packagePath)
 if (-not (Test-Path -LiteralPath $resolvedPackagePath -PathType Leaf)) {
     throw "Manifest packagePath does not exist: $resolvedPackagePath"
 }
@@ -333,7 +344,8 @@ if (-not (Get-Command -Name 'az' -ErrorAction SilentlyContinue)) {
     throw 'Azure CLI (az) is required for Function App OneDeploy.'
 }
 
-$releasedPackagePath = Stage-ReleasedPackage -SourcePackagePath $resolvedPackagePath
+$stagingDirectory = if ($useReleasedPackage) { Join-Path (Split-Path $PSScriptRoot -Parent) '.local\artifacts\function-app-package' } else { Split-Path $resolvedPackagePath -Parent }
+$releasedPackagePath = Stage-ReleasedPackage -SourcePackagePath $resolvedPackagePath -DestinationDirectory $stagingDirectory
 $deploymentStorage = Get-FunctionAppDeploymentStorage -ResourceGroupName $ResourceGroupName -FunctionAppName $FunctionAppName
 $templatePublishResult = if ($SkipTemplatePublish) {
     [PSCustomObject]@{

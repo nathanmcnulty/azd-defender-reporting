@@ -66,11 +66,11 @@ Future `WebApp` hosting can be added by introducing a new web module and script 
 
 ## Upstream contract
 
-The wrapper resolves upstream source from either:
+The wrapper resolves upstream source from:
 
 1. `DEFENDER_REPORTING_PATH` for a local side-by-side checkout, or
-2. `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` for an explicit override, or
-3. the committed `contracts/upstream-lock.json` release and full commit SHA
+2. the committed, SHA-256-locked source archive for the tested release, or
+3. `DEFENDER_REPORTING_REPO` + `DEFENDER_REPORTING_REF` for an explicit development override
 
 See [docs/upstream-integration.md](docs/upstream-integration.md) for the exact behavior.
 

@@ -6,7 +6,8 @@ param(
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
     [string]$CacheRoot = (Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\upstream'),
-    [switch]$UseExistingCacheOnly
+    [switch]$UseExistingCacheOnly,
+    [switch]$ForceRemote
 )
 
 Set-StrictMode -Version Latest
@@ -32,11 +33,40 @@ function Invoke-GitCommand {
 $compatibilityLock = Get-UpstreamCompatibilityLock
 $RepositoryUrl = if ([string]::IsNullOrWhiteSpace($RepositoryUrl)) { [string]$compatibilityLock.repository } else { $RepositoryUrl }
 $Ref = if ([string]::IsNullOrWhiteSpace($Ref)) { [string]$compatibilityLock.ref } else { $Ref }
+$repoRoot = Split-Path -Path $PSScriptRoot -Parent
+$bundleLockPath = Join-Path $repoRoot 'contracts\upstream-package.json'
+$bundleLock = Get-Content -LiteralPath $bundleLockPath -Raw -ErrorAction Stop | ConvertFrom-Json -Depth 5
+if ($bundleLock.schemaVersion -ne 1 -or [string]$bundleLock.sourceCommit -ne [string]$compatibilityLock.commit -or
+    [string]$bundleLock.archivePath -notmatch '^vendor/[A-Za-z0-9._-]+\.zip$' -or
+    [string]$bundleLock.archiveSha256 -notmatch '^[A-Fa-f0-9]{64}$' -or
+    [long]$bundleLock.archiveSizeBytes -le 0) {
+    throw 'Bundled upstream release metadata does not match the reviewed compatibility lock.'
+}
+$bundleArchivePath = Join-Path $repoRoot ([string]$bundleLock.archivePath)
+$bundleRoot = Join-Path $repoRoot '.local\bundled'
+$bundlePath = Join-Path $bundleRoot ([string]$bundleLock.archiveSha256).Substring(0, 16)
+
+function Assert-BundledArchive {
+    if (-not (Test-Path -LiteralPath $bundleArchivePath -PathType Leaf)) { throw 'Bundled upstream release archive is missing.' }
+    $archive = Get-Item -LiteralPath $bundleArchivePath
+    if ($archive.Length -ne [long]$bundleLock.archiveSizeBytes -or
+        (Get-FileHash -LiteralPath $bundleArchivePath -Algorithm SHA256).Hash -ne [string]$bundleLock.archiveSha256) {
+        throw 'Bundled upstream release archive failed size or SHA-256 verification.'
+    }
+}
 
 if ([string]::IsNullOrWhiteSpace($RepositoryPath) -eq $false) {
     $resolvedPath = Resolve-AbsolutePath -Path $RepositoryPath
     if (-not (Test-Path -LiteralPath $resolvedPath -PathType Container)) {
         throw "DEFENDER_REPORTING_PATH does not exist: $resolvedPath"
+    }
+
+    if ($resolvedPath -eq $bundlePath) {
+        Assert-BundledArchive
+        return [PSCustomObject]@{
+            RepositoryUrl = $RepositoryUrl; Ref = $Ref; ResolvedPath = $resolvedPath
+            Commit = [string]$compatibilityLock.commit; Source = 'bundled-release'; MatchesCompatibilityLock = $true
+        }
     }
 
     $commit = Invoke-GitCommand -Arguments @('-C', $resolvedPath, 'rev-parse', 'HEAD')
@@ -49,6 +79,27 @@ if ([string]::IsNullOrWhiteSpace($RepositoryPath) -eq $false) {
         MatchesCompatibilityLock = ($commit -eq [string]$compatibilityLock.commit)
     }
     return
+}
+
+if (-not $ForceRemote -and $RepositoryUrl -eq [string]$compatibilityLock.repository -and $Ref -eq [string]$compatibilityLock.ref) {
+    Assert-BundledArchive
+    $resolvedBundleRoot = [IO.Path]::GetFullPath($bundleRoot)
+    $resolvedBundlePath = [IO.Path]::GetFullPath($bundlePath)
+    if (-not $resolvedBundlePath.StartsWith($resolvedBundleRoot + [IO.Path]::DirectorySeparatorChar, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'Bundled upstream destination escaped its cache root.'
+    }
+    if (Test-Path -LiteralPath $bundlePath) {
+        if ((Get-Item -LiteralPath $bundlePath).Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw 'Bundled upstream destination is a reparse point.'
+        }
+        Remove-Item -LiteralPath $bundlePath -Recurse -Force
+    }
+    New-Item -ItemType Directory -Path $bundlePath -Force | Out-Null
+    Expand-Archive -LiteralPath $bundleArchivePath -DestinationPath $bundlePath -Force
+    return [PSCustomObject]@{
+        RepositoryUrl = $RepositoryUrl; Ref = $Ref; ResolvedPath = $bundlePath
+        Commit = [string]$compatibilityLock.commit; Source = 'bundled-release'; MatchesCompatibilityLock = $true
+    }
 }
 
 $resolvedCacheRoot = Resolve-AbsolutePath -Path $CacheRoot
