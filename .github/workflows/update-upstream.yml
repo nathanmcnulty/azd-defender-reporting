@@ -31,13 +31,13 @@ jobs:
         if: ${{ !cancelled() }}
         shell: pwsh
         run: |
-          if (-not (git status --porcelain -- contracts/upstream-lock.json)) { exit 0 }
+          if (-not (git status --porcelain -- contracts/upstream-lock.json contracts/upstream-package.json contracts/released-function-app.json vendor/defender-reporting-source.zip vendor/function-app-package.zip)) { exit 0 }
           $lock = Get-Content .\contracts\upstream-lock.json -Raw | ConvertFrom-Json
           $branch = "automation/upstream-$($lock.ref)"
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B $branch
-          git add contracts/upstream-lock.json
+          git add contracts/upstream-lock.json contracts/upstream-package.json contracts/released-function-app.json vendor/defender-reporting-source.zip vendor/function-app-package.zip
           git commit -m "Update compatible upstream to $($lock.ref)"
           git push --force-with-lease origin $branch
           $existing = gh pr list --head $branch --json number --jq '.[0].number'

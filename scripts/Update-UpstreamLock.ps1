@@ -27,13 +27,55 @@ if ([string]::IsNullOrWhiteSpace($CandidateRef)) {
     throw 'Unable to resolve a candidate upstream release.'
 }
 
-$candidate = & (Join-Path $PSScriptRoot 'Resolve-UpstreamRepo.ps1') -RepositoryUrl ([string]$lock.repository) -Ref $CandidateRef
+$candidate = & (Join-Path $PSScriptRoot 'Resolve-UpstreamRepo.ps1') -RepositoryUrl ([string]$lock.repository) -Ref $CandidateRef -ForceRemote
 & (Join-Path $PSScriptRoot 'Validate-Repository.ps1') -UpstreamRepositoryPath $candidate.ResolvedPath -ValidateAllUpstreamContracts
 
 if ($UpdateLock -and ($CandidateRef -ne [string]$lock.ref -or $candidate.Commit -ne [string]$lock.commit)) {
+    $repoRoot = Split-Path $PSScriptRoot -Parent
+    $archivePath = Join-Path $repoRoot 'vendor\defender-reporting-source.zip'
+    $packageLockPath = Join-Path $repoRoot 'contracts\upstream-package.json'
+    $functionPackagePath = Join-Path $repoRoot '.local\validation\function-app-package\defender-reporting-function-app.zip'
+    $functionManifestPath = Join-Path $repoRoot '.local\validation\function-app-package\defender-reporting-function-app.manifest.json'
+    if (-not (Test-Path -LiteralPath $functionPackagePath -PathType Leaf) -or -not (Test-Path -LiteralPath $functionManifestPath -PathType Leaf)) {
+        throw 'Validated Function App package or build manifest is missing.'
+    }
+    $functionManifest = Get-Content -LiteralPath $functionManifestPath -Raw | ConvertFrom-Json
+    $functionHash = (Get-FileHash -LiteralPath $functionPackagePath -Algorithm SHA256).Hash
+    $functionSize = (Get-Item -LiteralPath $functionPackagePath).Length
+    if ($functionHash -ne [string]$functionManifest.packageSha256 -or $functionSize -ne [long]$functionManifest.packageSizeBytes) {
+        throw 'Validated Function App package does not match its build manifest.'
+    }
+    $stagedArchive = Join-Path $repoRoot '.local\upstream\candidate-source.zip'
+    & git -C $candidate.ResolvedPath archive --format=zip --output $stagedArchive $candidate.Commit
+    if ($LASTEXITCODE -ne 0 -or -not (Test-Path -LiteralPath $stagedArchive -PathType Leaf)) {
+        throw 'Could not archive the validated upstream source commit.'
+    }
+    $archiveHash = (Get-FileHash -LiteralPath $stagedArchive -Algorithm SHA256).Hash
+    $archiveSize = (Get-Item -LiteralPath $stagedArchive).Length
+    $packageLock = [ordered]@{
+        schemaVersion = 1
+        sourceCommit = [string]$candidate.Commit
+        archivePath = 'vendor/defender-reporting-source.zip'
+        archiveSha256 = $archiveHash
+        archiveSizeBytes = $archiveSize
+    }
+    Copy-Item -LiteralPath $stagedArchive -Destination $archivePath -Force
+    Copy-Item -LiteralPath $functionPackagePath -Destination (Join-Path $repoRoot 'vendor\function-app-package.zip') -Force
+    $releasedFunctionLock = [ordered]@{
+        schemaVersion = 1
+        sourceCommit = [string]$candidate.Commit
+        packagePath = 'vendor/function-app-package.zip'
+        packageSha256 = $functionHash
+        packageSizeBytes = $functionSize
+        functionAppEntryPointFingerprint = [string]$functionManifest.functionAppEntryPointFingerprint
+        sharedHelpersFingerprint = [string]$functionManifest.sharedHelpersFingerprint
+        stagedAzAccountsModule = $functionManifest.stagedAzAccountsModule
+    }
     $lock.ref = $CandidateRef
     $lock.commit = $candidate.Commit
     $lock.validatedOnUtc = [datetime]::UtcNow.ToString('o')
+    $packageLock | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath $packageLockPath -Encoding utf8
+    $releasedFunctionLock | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath (Join-Path $repoRoot 'contracts\released-function-app.json') -Encoding utf8
     $lock | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $lockPath -Encoding utf8
 }
 

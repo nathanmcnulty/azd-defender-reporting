@@ -70,6 +70,7 @@ if ($ValidateFunctionAppPackage) {
     & (Join-Path $scriptRoot 'Publish-FunctionAppPackage.ps1') `
         -RepositoryPath $UpstreamRepositoryPath `
         -OutputPath $packageOutputPath `
+        -RebuildFromSource `
         -BuildOnly | Out-Null
 }
 

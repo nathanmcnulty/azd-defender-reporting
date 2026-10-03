@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sourceCommit": "28c68b4ea5521f834884a8f7aad9cfb38f1588b8",
+  "packagePath": "vendor/function-app-package.zip",
+  "packageSha256": "C4FAB102F70CD0FEFE9919D41A049D05A2BE13F371BBC0A12765D2598BE34887",
+  "packageSizeBytes": 20500836,
+  "functionAppEntryPointFingerprint": "f8e4e57d616dac2f2f3442b9c294ae415f8dc7e7447181b46f2f23c61fb7d745",
+  "sharedHelpersFingerprint": "f8e4e57d616dac2f2f3442b9c294ae415f8dc7e7447181b46f2f23c61fb7d745",
+  "stagedAzAccountsModule": {
+    "version": "5.5.0",
+    "bundledVersions": ["5.5.0", "5.3.4"],
+    "fileCount": 152
+  }
+}

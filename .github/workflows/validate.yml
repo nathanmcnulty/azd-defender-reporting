@@ -20,6 +20,11 @@ jobs:
       - name: Install Bicep CLI
         shell: pwsh
         run: az bicep install
+      - name: Test bundled release integrity
+        shell: pwsh
+        run: |
+          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
+          Invoke-Pester -Path ./tests -CI
       - name: Validate wrapper and locked upstream contracts
         shell: pwsh
         run: .\scripts\Validate-Repository.ps1 -ValidateAllUpstreamContracts

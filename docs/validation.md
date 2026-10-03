@@ -22,6 +22,8 @@ Run every locked-upstream contract in one command:
 .\scripts\Validate-Repository.ps1 -ValidateAllUpstreamContracts
 ```
 
+This default path validates the committed source archive and rebuilds from it without fetching upstream source. `contracts/upstream-package.json` pins its SHA-256 and size to the immutable commit in `contracts/upstream-lock.json`. The supported Function App publish path instead verifies and deploys the prebuilt package pinned in `contracts/released-function-app.json`, so build-host module selection cannot change deployed bytes. A local checkout is only needed for an explicit development override.
+
 The wrapper publish entrypoint also supports a no-change planning pass:
 
 ```powershell
