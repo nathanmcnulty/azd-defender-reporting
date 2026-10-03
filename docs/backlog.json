@@ -1,0 +1,135 @@
+{
+  "schemaVersion": "1.0.0",
+  "repository": "nathanmcnulty/azd-defender-reporting",
+  "sourceRevision": "b54b5d42d372d56a21238623e33e030740b8b5a1",
+  "capturedAt": "2026-10-03",
+  "items": [
+    {
+      "id": "REPORT-001",
+      "title": "Reconcile this backlog with current source and active work",
+      "kind": "discovery",
+      "priority": "P1",
+      "status": "ready",
+      "wave": 0,
+      "problem": "Plans and implementation evidence are spread across files; the captured source can change while other tasks work.",
+      "scope": [
+        "docs/backlog.json",
+        "docs/backlog.md",
+        "Existing roadmap, execution status, open issues and pull requests (read-only)"
+      ],
+      "acceptance": [
+        "Classify each candidate as implemented, still open, superseded or awaiting evidence; retain source links and reasons.",
+        "Inspect dirty state, remotes, worktrees and local environment presence without reading secrets; avoid duplicate work with active owners.",
+        "Resolve the actual offline validation commands and record exact current default-branch/working-tree provenance; do not copy historical live passes to newer code."
+      ],
+      "validation": [
+        "git status --short",
+        "git remote -v",
+        "git worktree list --porcelain",
+        "Read the applicable instructions and validation workflow; read gh issue list and gh pr list for the named repository using nathanmcnulty. Do not create or modify issues/PRs."
+      ],
+      "dependencies": [],
+      "authorization": "local-only",
+      "components": [],
+      "sources": [
+        "README.md"
+      ],
+      "evidence": [],
+      "blocker": null
+    },
+    {
+      "id": "REPORT-002",
+      "title": "Qualify the locked compute and hosted-surface deployment matrix",
+      "kind": "verification",
+      "priority": "P1",
+      "status": "proposed",
+      "wave": 2,
+      "problem": "The wrapper explicitly relies on a locked upstream package contract; generic azd template readiness is not established.",
+      "scope": [
+        "contracts/",
+        "scripts/",
+        "docs/deployment-matrix.md"
+      ],
+      "acceptance": [
+        "Verify Function and Automation package provenance, manifest failures and exact upstream revision.",
+        "For each supported compute/web mode retain job success, hosted asset identity and Easy Auth enforcement evidence.",
+        "Document unsupported combinations and teardown; preserve the explicit upstream dependency instead of a false self-contained claim."
+      ],
+      "validation": [
+        "From the solution root run ./scripts/Validate-Repository.ps1",
+        "After separate authorization, retain redacted exact-target live evidence and cleanup results outside public Git. Do not execute live operations from this backlog alone."
+      ],
+      "dependencies": [],
+      "authorization": "azure-deployment",
+      "components": [],
+      "sources": [
+        "README.md",
+        "docs/deployment-matrix.md"
+      ],
+      "evidence": [],
+      "blocker": null
+    },
+    {
+      "id": "REPORT-003",
+      "title": "Evaluate optional WebApp hosting without forking upstream reporting",
+      "kind": "discovery",
+      "priority": "P2",
+      "status": "proposed",
+      "wave": 3,
+      "problem": "WebApp is a documented future surface; the shared Maester web module has application-specific assumptions.",
+      "scope": [
+        "infra/",
+        "scripts/Publish-HostedSurface.ps1",
+        "docs/deployment-matrix.md"
+      ],
+      "acceptance": [
+        "Produce adopt/adapt/defer decision comparing blob-backed Container App with WebApp identity, Easy Auth and asset contracts.",
+        "Keep upstream exporter/dashboard source authoritative and compute/web selection independent.",
+        "Do not vendor maester-report-webapp unchanged unless its Maester-specific behavior is compatible; define a narrow shared extraction only with two consumers."
+      ],
+      "validation": [
+        "From the solution root run ./scripts/Validate-Repository.ps1"
+      ],
+      "dependencies": [],
+      "authorization": "local-only",
+      "components": [
+        "maester-report-webapp"
+      ],
+      "sources": [
+        "README.md",
+        "docs/deployment-matrix.md"
+      ],
+      "evidence": [],
+      "blocker": null
+    },
+    {
+      "id": "REPORT-004",
+      "title": "Assess offline release packaging for the pinned-upstream deployment wrapper",
+      "kind": "discovery",
+      "priority": "P1",
+      "status": "proposed",
+      "wave": 0,
+      "problem": "Open report captured 2026-10-03 during execution reconciliation. Another code-quality task may own an active fix; inspect its PR and current source before dispatch.",
+      "scope": [
+        "Linked issue and current source (read-only)",
+        "Repository-local backlog evidence"
+      ],
+      "acceptance": [
+        "Read the linked issue and current default branch; classify the exact defect, current owner and evidence gap.",
+        "Record a current PR or verified resolution before selecting any implementation; preserve broader feature and live acceptance gates."
+      ],
+      "validation": [
+        "Read current issue and PR state using nathanmcnulty; do not modify or close issues during reconciliation.",
+        "Inspect dirty state and worktrees; resolve the exact current revision and relevant offline commands before implementation."
+      ],
+      "dependencies": [],
+      "authorization": "local-only",
+      "components": [],
+      "sources": [
+        "https://github.com/nathanmcnulty/azd-defender-reporting/issues/16"
+      ],
+      "evidence": [],
+      "blocker": null
+    }
+  ]
+}
