@@ -1,0 +1,67 @@
+{
+  "schemaVersion": "1.0",
+  "solutionId": "azd-defender-reporting",
+  "status": "implemented",
+  "coverage": "partial",
+  "reviewedOn": "2026-10-02",
+  "requirements": [
+    {
+      "resource": "https://graph.microsoft.com",
+      "kind": "delegated",
+      "permission": "openid",
+      "principal": "hosted-surface-user",
+      "phase": "runtime",
+      "feature": "hosted-login",
+      "defaultEnabled": true,
+      "scope": "tenant",
+      "rationale": "Declared hosted-surface delegated sign-in scopes.",
+      "evidenceState": "code",
+      "evidence": [
+        {
+          "path": "scripts/Set-HostedSurfaceAuth.ps1",
+          "sha256": "724728aefd33bbd80ab7332e1cd1269a93dd4d20bab6035a9c8077d3e768f843"
+        }
+      ]
+    },
+    {
+      "resource": "https://graph.microsoft.com",
+      "kind": "delegated",
+      "permission": "email",
+      "principal": "hosted-surface-user",
+      "phase": "runtime",
+      "feature": "hosted-login",
+      "defaultEnabled": true,
+      "scope": "tenant",
+      "rationale": "Declared hosted-surface delegated sign-in scopes.",
+      "evidenceState": "code",
+      "evidence": [
+        {
+          "path": "scripts/Set-HostedSurfaceAuth.ps1",
+          "sha256": "724728aefd33bbd80ab7332e1cd1269a93dd4d20bab6035a9c8077d3e768f843"
+        }
+      ]
+    },
+    {
+      "resource": "https://graph.microsoft.com",
+      "kind": "delegated",
+      "permission": "profile",
+      "principal": "hosted-surface-user",
+      "phase": "runtime",
+      "feature": "hosted-login",
+      "defaultEnabled": true,
+      "scope": "tenant",
+      "rationale": "Declared hosted-surface delegated sign-in scopes.",
+      "evidenceState": "code",
+      "evidence": [
+        {
+          "path": "scripts/Set-HostedSurfaceAuth.ps1",
+          "sha256": "724728aefd33bbd80ab7332e1cd1269a93dd4d20bab6035a9c8077d3e768f843"
+        }
+      ]
+    }
+  ],
+  "gaps": [
+    "Azure RBAC scopes, operator/consent roles, cleanup, and optional connector permissions still need a full review.",
+    "Report collection API permissions, bootstrap authority, and hosted-surface role assignments need review."
+  ]
+}
