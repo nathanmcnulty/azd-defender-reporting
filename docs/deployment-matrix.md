@@ -2,6 +2,10 @@
 
 The wrapper keeps compute and web choices independent so future hosting additions do not force a redesign.
 
+The [optional Web App assessment](webapp-compatibility-assessment.md) defers
+unchanged Maester Web App reuse and records the exact identity, auth and asset
+contracts a future adapter must preserve.
+
 | `COMPUTE_KIND` | `WEB_KIND` | Resolved package mode when `DASHBOARD_PACKAGE_MODE=auto` | Current behavior |
 | --- | --- | --- | --- |
 | `functionapp` | `containerapp` | `hosted` | Provisions Flex Consumption Function App, storage, monitoring, and a managed-identity Container App that serves hosted dashboard blobs |
