@@ -78,7 +78,7 @@
       "title": "Evaluate optional WebApp hosting without forking upstream reporting",
       "kind": "discovery",
       "priority": "P2",
-      "status": "proposed",
+      "status": "done",
       "wave": 3,
       "problem": "WebApp is a documented future surface; the shared Maester web module has application-specific assumptions.",
       "scope": [
@@ -103,8 +103,14 @@
         "README.md",
         "docs/deployment-matrix.md"
       ],
-      "evidence": [],
-      "blocker": null
+      "evidence": [
+        "Source-backed optional Web App assessment on 2026-10-10 at published wrapper main 8f258252417cb9f675a8b1ec3a8649582bdca91c. docs/webapp-compatibility-assessment.md compares current Blob-backed Container App identity, Storage Blob reader, asset synchronization and Easy Auth with maester-report-webapp 0.1.1 at immutable Reference revision 29bcc4c8f08855b35f7a357dd2c8c8819824ce7c; the complete component directory is unchanged through inspected Reference main 277584b33fcae7d47113718aad6428abdc4bc50f.",
+        "Decision: defer unchanged component adoption. The Maester module serves local wwwroot through pm2 and supplies optional Website Contributor, but does not preserve Defender Blob asset sync/required-file paths, runtime reader assignment or the current tenant/group/auth adapter. The assessment records missing identity, auth, publishing, rollback and ownership contracts rather than treating copied infrastructure as a supported Web App path.",
+        "The upstream defender-reporting exporter/dashboard remains authoritative at the existing integrity-bound release; compute and web selection remain independent. No reporting fork, generic shared extraction, component lock, infrastructure, runtime or permission change is introduced. Any later extraction needs equivalent evidence from two real consumers. This completes the original local assessment acceptance without claiming deployed App Service, recipient/browser output or live auth/cleanup qualification.",
+        "PowerShell 7.6.6 registered ./scripts/Validate-Repository.ps1 -ValidateAllUpstreamContracts passed parser, private Bicep 0.46.1 compile, upstream Function package build/helper/module staging, Automation runbook build, template publisher contract and hosted asset comparison. Bundled-release Pester 5.7.1 passed 4 tests with zero failures/skips including tampered package/archive rejection. Canonical backlog schema, generated review view and Git whitespace checks passed. No authentication, Azure/Graph mutation or delivery ran."
+      ],
+      "blocker": null,
+      "claim": null
     },
     {
       "id": "REPORT-004",
