@@ -38,7 +38,7 @@ The **Automation Account publish** path is also wired to the upstream runbook co
 - generated runbook artifact: `azure\Invoke-DashboardPipeline.ps1`
 - wrapper publish script: `scripts\Publish-AutomationRunbook.ps1`
 
-The wrapper builds the upstream runbook, uploads template assets, creates or updates the PowerShell 7.4 runtime environment, publishes `Invoke-DashboardPipeline`, sets the required Automation variables, and maintains the daily schedule.
+The wrapper builds the upstream runbook, uploads template assets, creates or updates the PowerShell 7.6 runtime environment, publishes `Invoke-DashboardPipeline`, sets the required Automation variables, and maintains the daily schedule.
 
 The **hosted web surface** is a blob-backed Container App:
 
