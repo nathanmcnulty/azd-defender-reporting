@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+
 Describe 'Bundled upstream release' {
     BeforeAll {
         $repoRoot = Split-Path $PSScriptRoot -Parent

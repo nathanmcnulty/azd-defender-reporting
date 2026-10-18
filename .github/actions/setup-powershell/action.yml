@@ -1,0 +1,24 @@
+name: Select PowerShell 7.6.6
+description: Verify the official Windows x64 archive and select it for subsequent steps.
+runs:
+  using: composite
+  steps:
+    - name: Bootstrap the supported runtime
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $runtimeRoot = Join-Path $env:RUNNER_TEMP 'reporting-powershell-7.6.6'
+        $archive = Join-Path $env:RUNNER_TEMP 'PowerShell-7.6.6-win-x64.zip'
+        Invoke-WebRequest -Uri 'https://github.com/PowerShell/PowerShell/releases/download/v7.6.6/PowerShell-7.6.6-win-x64.zip' -OutFile $archive
+        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -cne '02FE458BE20493FBDF43F61EA20610B811EE6C738AB1676C61B9CFCD1A33C860') {
+          throw 'PowerShell archive hash mismatch.'
+        }
+        Expand-Archive -LiteralPath $archive -DestinationPath $runtimeRoot -Force
+        $runtimeRoot >> $env:GITHUB_PATH
+    - name: Assert selected runtime
+      shell: pwsh
+      run: |
+        if ($PSVersionTable.PSVersion -ne [version]'7.6.6' -or -not [Environment]::Is64BitProcess) {
+          throw "Expected 64-bit PowerShell 7.6.6; observed $($PSVersionTable.PSVersion)."
+        }
+        Write-Host "PowerShell $($PSVersionTable.PSVersion); .NET $([Environment]::Version); 64-bit $([Environment]::Is64BitProcess)."

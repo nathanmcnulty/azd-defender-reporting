@@ -17,14 +17,20 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup-powershell
       - name: Install Bicep CLI
         shell: pwsh
         run: az bicep install
       - name: Test bundled release integrity
         shell: pwsh
         run: |
-          Install-Module Pester -RequiredVersion 5.7.1 -Scope CurrentUser -Force
-          Invoke-Pester -Path ./tests -CI
+          Install-Module Pester -RequiredVersion 6.2.0 -Scope CurrentUser -Force
+          Import-Module Pester -RequiredVersion 6.2.0 -Force
+          Write-Host "Testing with PowerShell $($PSVersionTable.PSVersion) and Pester $((Get-Module Pester).Version)."
+          $result = Invoke-Pester -Path ./tests -CI -PassThru
+          if ($result.Result -ne 'Passed' -or $result.TotalCount -eq 0 -or $result.SkippedCount -or $result.InconclusiveCount -or $result.NotRunCount) {
+            throw 'The complete bundled-release test suite must pass without omissions.'
+          }
       - name: Validate wrapper and locked upstream contracts
         shell: pwsh
         run: .\scripts\Validate-Repository.ps1 -ValidateAllUpstreamContracts
