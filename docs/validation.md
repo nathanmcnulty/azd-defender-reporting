@@ -1,5 +1,14 @@
 # Validation
 
+Use PowerShell 7.6 or later. To run the bundled-release tests, install and import
+Pester 6.2.0 explicitly:
+
+```powershell
+Install-Module Pester -RequiredVersion 6.2.0 -Scope CurrentUser
+Import-Module Pester -RequiredVersion 6.2.0
+Invoke-Pester ./tests
+```
+
 Run the wrapper-owned validation entrypoint:
 
 ```powershell

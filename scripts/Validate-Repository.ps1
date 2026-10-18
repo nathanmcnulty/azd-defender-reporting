@@ -1,4 +1,4 @@
-#Requires -Version 7.0
+#Requires -Version 7.6
 
 [CmdletBinding()]
 param(
@@ -12,6 +12,7 @@ param(
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+Write-Output "Validating with PowerShell $($PSVersionTable.PSVersion) / .NET $([Environment]::Version)."
 
 $scriptRoot = Split-Path -Path $PSCommandPath -Parent
 $repoRoot = Split-Path -Path $scriptRoot -Parent
