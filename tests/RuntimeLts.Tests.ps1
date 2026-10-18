@@ -1,3 +1,5 @@
+#Requires -Version 7.6
+
 Describe 'Wrapper hosted PowerShell LTS runtime' {
     BeforeAll {
         $repoRoot = Join-Path $PSScriptRoot '..'

@@ -144,6 +144,44 @@
       ],
       "blocker": null,
       "claim": null
+    },
+    {
+      "id": "REPORT-005",
+      "title": "Complete the owned PowerShell 7.6 and Pester 6.2 baseline",
+      "kind": "maintenance",
+      "priority": "P1",
+      "status": "done",
+      "wave": 1,
+      "problem": "The hosted-runtime draft selected PowerShell 7.6, while owned scripts still declared 7.0 and CI installed Pester 5.7.1.",
+      "scope": [
+        "scripts/",
+        "tests/",
+        ".github/",
+        "README.md",
+        "docs/runtime-baseline.md",
+        "docs/validation.md"
+      ],
+      "acceptance": [
+        "Owned scripts and tests require PowerShell 7.6+ and CI imports exact Pester 6.2.0.",
+        "All three workflows that run repository PowerShell explicitly select and verify PowerShell 7.6.6 before repository work.",
+        "Preserve locked upstream archives, compatibility contracts, runtime topology and the full contract-validation gate."
+      ],
+      "validation": [
+        "Import-Module Pester -RequiredVersion 6.2.0; Invoke-Pester ./tests -PassThru",
+        "./scripts/Validate-Repository.ps1 -ValidateAllUpstreamContracts",
+        "Verify vendor archive hashes, unchanged contracts/infra, baseline scan and canonical backlog schema/render checks."
+      ],
+      "dependencies": [],
+      "authorization": "local-only",
+      "components": [],
+      "sources": [
+        "https://github.com/nathanmcnulty/azd-defender-reporting/issues/20"
+      ],
+      "evidence": [
+        "Source baseline follow-up to draft #21 head dd3a1aa544c9760685ceb20c9e90458ed01b2adb: all fourteen owned scripts and both test files require 7.6; one shared local CI action selects official SHA-256-verified Windows x64 PowerShell 7.6.6 for validation, upstream-update and opt-in smoke workflows. Pester 6.2.0 is explicitly installed/imported and the nonempty suite rejects failed, skipped, inconclusive and unexecuted outcomes. Local PowerShell 7.6.6/.NET 10.0.12 passed 7/7 tests with zero omissions; full locked-upstream gate passed in 22.7 seconds without removing stages. Both ZIPs and all locks/infra remain unchanged. Historical upstream archive requirements are frozen evidence. No live authentication, deployment, export, schedule mutation, grant or workflow dispatch occurred; issue #20 and REPORT-002 retain separate native qualification gates."
+      ],
+      "blocker": null,
+      "claim": null
     }
   ]
 }

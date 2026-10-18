@@ -10,6 +10,9 @@ This repo is intentionally **not** a fork of the dashboard application. The upst
 - wrapper-specific docs and deployment contracts
 - `contracts/` tested upstream release and hosted-asset contracts
 
+Use PowerShell 7.6 or later for wrapper scripts, and Pester 6.2.0 for repository
+tests. See [validation](docs/validation.md) and the [runtime baseline](docs/runtime-baseline.md).
+
 > [!IMPORTANT]
 > This wrapper is not a self-contained dashboard application and does not support the generic `azd init -t nathanmcnulty/azd-defender-reporting && azd up` promise. Provisioning and publishing depend on the locked or explicitly selected upstream `defender-reporting` source contract. Use the supported `scripts\Deploy.ps1` flow below, review the upstream lock, and expect publish validation to stop if the source or manifest contract is unavailable.
 
