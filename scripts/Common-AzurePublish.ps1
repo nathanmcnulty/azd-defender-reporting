@@ -42,6 +42,9 @@ function Get-AzCliJson {
         [string[]]$Arguments
     )
 
+    Assert-PublishTarget
+    if ($Arguments -contains '--subscription' -or $Arguments -contains '--tenant') { throw 'CLI target selectors are owned by the publisher guard.' }
+    $Arguments += @('--subscription', $script:PublishTarget.SubscriptionId)
     $commandOutput = @(az @Arguments 2>&1)
     $commandText = Get-TextFromProcessOutput -Output $commandOutput
     if ($LASTEXITCODE -ne 0) {
@@ -62,6 +65,9 @@ function Get-AzCliText {
         [string[]]$Arguments
     )
 
+    Assert-PublishTarget
+    if ($Arguments -contains '--subscription' -or $Arguments -contains '--tenant') { throw 'CLI target selectors are owned by the publisher guard.' }
+    $Arguments += @('--subscription', $script:PublishTarget.SubscriptionId)
     $commandOutput = @(az @Arguments 2>&1)
     $commandText = Get-TextFromProcessOutput -Output $commandOutput
     if ($LASTEXITCODE -ne 0) {
@@ -82,56 +88,28 @@ function Test-AzRestNotFound {
 
 function Get-AzAccessToken {
     [CmdletBinding()]
-    param(
-        [Parameter(Mandatory = $true)]
-        [string]$Url
-    )
+    param([Parameter(Mandatory)][string]$Url)
 
-    $requestUri = [System.Uri]$Url
-    $hostName = $requestUri.Host.ToLowerInvariant()
-    $tokenCacheName = 'AzAccessTokenCache'
-    $tokenCache = Get-Variable -Name $tokenCacheName -Scope Script -ErrorAction SilentlyContinue
-    if ($null -eq $tokenCache) {
-        $script:AzAccessTokenCache = @{}
+    Assert-PublishTarget
+    $uri = [uri]$Url
+    Assert-PublishRequestUri -Uri $uri
+    $resource = switch ($uri.Host) {
+        'management.azure.com' { 'https://management.azure.com/' }
+        'graph.microsoft.com' { 'https://graph.microsoft.com' }
+        default { 'https://storage.azure.com/' }
     }
-
-    $resourceKey = switch ($hostName) {
-        'management.azure.com' { 'arm'; break }
-        'graph.microsoft.com' { 'ms-graph'; break }
-        default { '{0}://{1}/' -f $requestUri.Scheme, $requestUri.Host; break }
+    $key = "$resource|$($script:PublishTarget.SubscriptionId)|$($script:PublishTarget.TenantId)".ToLowerInvariant()
+    if (-not (Get-Variable AzAccessTokenCache -Scope Script -ErrorAction SilentlyContinue)) { $script:AzAccessTokenCache = @{} }
+    if ($script:AzAccessTokenCache.ContainsKey($key) -and $script:AzAccessTokenCache[$key].ExpiresOn -gt (Get-Date).AddMinutes(5)) {
+        return $script:AzAccessTokenCache[$key].AccessToken
     }
-
-    if ($script:AzAccessTokenCache.ContainsKey($resourceKey)) {
-        $cachedToken = $script:AzAccessTokenCache[$resourceKey]
-        if ($cachedToken.ExpiresOn -gt (Get-Date).AddMinutes(5)) {
-            return $cachedToken.AccessToken
-        }
-    }
-
-    $tokenArguments = @('account', 'get-access-token', '--output', 'json')
-    if ($resourceKey -in @('arm', 'ms-graph')) {
-        $tokenArguments += @('--resource-type', $resourceKey)
-    }
-    else {
-        $tokenArguments += @('--resource', $resourceKey)
-    }
-
-    $tokenResponse = Get-AzCliJson -Arguments $tokenArguments
-    if ($null -eq $tokenResponse -or [string]::IsNullOrWhiteSpace([string]$tokenResponse.accessToken)) {
-        throw "Failed to acquire an Azure access token for '$resourceKey'."
-    }
-
+    $response = Get-PublishTokenResponse -Resource $resource -Graph:($uri.Host -eq 'graph.microsoft.com')
     $expiresOn = Get-Date
-    if ($tokenResponse.PSObject.Properties.Match('expiresOn').Count -gt 0 -and -not [string]::IsNullOrWhiteSpace([string]$tokenResponse.expiresOn)) {
-        $expiresOn = [datetimeoffset]::Parse([string]$tokenResponse.expiresOn).UtcDateTime
+    if ($response.PSObject.Properties['expiresOn']) {
+        try { $expiresOn = [datetimeoffset]::Parse([string]$response.expiresOn).UtcDateTime } catch { throw 'Invalid token expiry metadata.' }
     }
-
-    $script:AzAccessTokenCache[$resourceKey] = [PSCustomObject]@{
-        AccessToken = [string]$tokenResponse.accessToken
-        ExpiresOn = $expiresOn
-    }
-
-    return [string]$tokenResponse.accessToken
+    $script:AzAccessTokenCache[$key] = [pscustomobject]@{ AccessToken = $response.accessToken; ExpiresOn = $expiresOn }
+    return $response.accessToken
 }
 
 function Invoke-AzRestJson {
@@ -158,6 +136,8 @@ function Invoke-AzRestJson {
         Headers = $headers
         UseBasicParsing = $true
         SkipHttpErrorCheck = $true
+        MaximumRedirection = 0
+        TimeoutSec = 120
     }
 
     if ($PSBoundParameters.ContainsKey('Body') -and $Method -notin @('GET', 'DELETE')) {
@@ -165,6 +145,7 @@ function Invoke-AzRestJson {
         $requestArguments.ContentType = 'application/json'
     }
 
+    Assert-PublishTarget
     $response = Invoke-WebRequest @requestArguments
     $statusCode = [int]$response.StatusCode
     $responseText = [string]$response.Content
@@ -446,3 +427,5 @@ function Resolve-StorageAccountName {
         -ResourceType 'Microsoft.Storage/storageAccounts' `
         -FriendlyName 'storage account'
 }
+
+. (Join-Path $PSScriptRoot 'Publish-TargetGuard.ps1')

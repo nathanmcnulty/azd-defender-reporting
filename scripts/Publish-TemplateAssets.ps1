@@ -2,8 +2,11 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [Parameter(Mandatory = $true)]
     [string]$StorageAccountName,
+    [string]$ResourceGroupName,
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
     [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
@@ -15,6 +18,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
 
 $upstreamRepo = & (Join-Path $PSScriptRoot 'Resolve-UpstreamRepo.ps1') `
     -RepositoryUrl $RepositoryUrl `
@@ -134,10 +142,41 @@ if ($supportsMetadataPath) {
     $uploadParameters.MetadataPath = $resolvedMetadataPath
 }
 
-Write-Verbose ("Resolved upstream repo: {0} ({1})" -f $upstreamRepo.ResolvedPath, $upstreamRepo.Commit)
-Write-Verbose ("Uploading template assets with upstream script: {0}" -f $publishScript.Path)
-
-& $publishScript.Path @uploadParameters
+# Reuse locked upstream's offline template state contract, never its ambient
+# authentication/publishing functions. The archive and its version remain unchanged.
+. (Join-Path $upstreamRepo.ResolvedPath 'build/private/AzureArtifactBuildTools.ps1')
+$resolvedTemplatesPath = Resolve-DashboardTemplatesPath -RepoRoot $upstreamRepo.ResolvedPath -TemplatesPath $TemplatesPath
+$publishState = Get-DashboardTemplatePublishState -TemplatesPath $resolvedTemplatesPath -RepoRoot $upstreamRepo.ResolvedPath
+$publisherMetadata = [pscustomobject]@{
+    generatedOnUtc = [datetime]::UtcNow.ToString('o')
+    publishScript = 'build/Publish-DashboardTemplates.ps1'
+    storageAccountName = $StorageAccountName
+    containerName = 'templates'
+    templatesPath = $publishState.TemplatesDisplayPath
+    templateFingerprint = $publishState.Fingerprint
+    templateFileCount = $publishState.FileCount
+    totalSizeBytes = $publishState.TotalSizeBytes
+    files = @($publishState.Files | ForEach-Object {
+        [pscustomobject]@{ path = $_.Path; sourcePath = $_.SourcePath; sha256 = $_.Sha256; contentType = $_.ContentType; sizeBytes = $_.SizeBytes }
+    })
+}
+Assert-TemplatePublisherMetadata -Metadata $publisherMetadata -ExpectedStorageAccountName $StorageAccountName -ExpectedContainerName 'templates'
+Assert-PublishStorage -StorageAccountName $StorageAccountName -ResourceGroupName $ResourceGroupName
+foreach ($file in $publishState.Files) {
+    if ((Get-FileHash -LiteralPath $file.FullPath -Algorithm SHA256).Hash -ine $file.Sha256 -or
+        (Get-Item -LiteralPath $file.FullPath).Length -ne $file.SizeBytes) { throw 'Template bytes changed after package validation.' }
+    $blobPath = (@($file.Path -split '/' | ForEach-Object { [uri]::EscapeDataString($_) }) -join '/')
+    $uri = "https://$StorageAccountName.blob.core.windows.net/templates/$blobPath"
+    $headers = @{
+        Authorization = 'Bearer {0}' -f (Get-AzAccessToken -Url $uri)
+        'x-ms-version' = '2023-11-03'
+        'x-ms-date' = [datetime]::UtcNow.ToString('R')
+        'x-ms-blob-type' = 'BlockBlob'
+    }
+    Assert-PublishTarget
+    Invoke-WebRequest -Method Put -Uri $uri -Headers $headers -InFile $file.FullPath -ContentType $file.ContentType -MaximumRedirection 0 -TimeoutSec 120 | Out-Null
+}
+$publisherMetadata | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $resolvedMetadataPath -Encoding utf8
 
 if ($supportsMetadataPath) {
     if (-not (Test-Path -LiteralPath $resolvedMetadataPath -PathType Leaf)) {

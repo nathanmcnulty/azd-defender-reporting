@@ -214,7 +214,7 @@ The wrapper explicitly relies on a locked upstream package contract; generic azd
 
 **Evidence:**
 
-- _none_
+- 2026-10-19 issue &num;23 source follow-up on reviewed PR &num;22 head 6bf3dc32f1d616632b21b96666f5bdb2fc6c6bdb&colon; maintained Function, Automation, template, hosted-auth and orchestration entrypoints require explicit tenant/subscription and fresh Enabled ARM validation; target-bound token metadata/cache and exact resource checks preserve frozen upstream archives/contracts. Actual-entrypoint offline tripwires and full upstream-contract validation are recorded in docs/validation.md. No live authentication, Azure/Graph action, grant, workflow dispatch, merge or release; REPORT-002 and issue &num;20 remain open native qualification gates.
 
 **Review and authorization note:**
 
