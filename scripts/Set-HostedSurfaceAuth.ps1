@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
     [Parameter(Mandatory = $true)]
@@ -16,6 +18,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
 
 $containerAppApiVersion = '2024-03-01'
 $graphApiBaseUrl = 'https://graph.microsoft.com'
@@ -58,12 +65,7 @@ function Resolve-SecurityGroupDefinition {
 
     $parsedGuid = [guid]::Empty
     if ([guid]::TryParse($Group, [ref]$parsedGuid)) {
-        $groupResult = Get-AzCliJson -Arguments @(
-            'ad', 'group', 'show',
-            '--group', $Group,
-            '--query', '{id:id,displayName:displayName}',
-            '--output', 'json'
-        )
+        $groupResult = Invoke-AzRestJson -Method GET -Url "$graphApiBaseUrl/v1.0/groups/${Group}?`$select=id,displayName"
 
         return [PSCustomObject]@{
             Id = [string]$groupResult.id
@@ -71,14 +73,8 @@ function Resolve-SecurityGroupDefinition {
         }
     }
 
-    $groupMatches = @(
-        Get-AzCliJson -Arguments @(
-            'ad', 'group', 'list',
-            '--display-name', $Group,
-            '--query', '[].{id:id,displayName:displayName}',
-            '--output', 'json'
-        )
-    )
+    $query = Join-QueryParameter -Name '$filter' -Value ("displayName eq '$(Escape-ODataStringLiteral $Group)'")
+    $groupMatches = @((Invoke-AzRestJson -Method GET -Url "$graphApiBaseUrl/v1.0/groups?$query&`$select=id,displayName").value)
 
     if ($groupMatches.Count -eq 0) {
         throw "No Entra ID group found with display name '$Group'. Pass the group object ID or a unique display name, or opt out with -SkipAuthSetup."
@@ -266,7 +262,6 @@ function Ensure-DelegatedPermissionGrant {
             return
         }
 
-        $tenantId = [string](Get-AzCliJson -Arguments @('account', 'show', '--query', 'tenantId', '--output', 'json'))
         $consentUrl = "https://login.microsoftonline.com/$tenantId/adminconsent?client_id=$AppClientId"
         throw "Granting admin consent for openid/email/profile failed. An administrator may need to approve the app first: $consentUrl`n$($_.Exception.Message)"
     }
@@ -376,22 +371,22 @@ $resolvedAppRegistrationDisplayName = Resolve-AppRegistrationDisplayName `
     -ContainerAppName $ContainerAppName `
     -RequestedDisplayName $requestedAppRegistrationDisplayName
 
-$account = Get-AzCliJson -Arguments @('account', 'show', '--output', 'json')
-$subscriptionId = [string]$account.id
-$tenantId = [string]$account.tenantId
+# SubscriptionId and TenantId are the validated explicit selectors.
 
 $containerApp = Get-AzCliJson -Arguments @(
     'resource', 'show',
     '--resource-group', $ResourceGroupName,
     '--resource-type', 'Microsoft.App/containerApps',
     '--name', $ContainerAppName,
-    '--query', '{fqdn:properties.configuration.ingress.fqdn}',
+    '--query', '{id:id,fqdn:properties.configuration.ingress.fqdn}',
     '--output', 'json'
 )
 
 if ($null -eq $containerApp -or [string]::IsNullOrWhiteSpace([string]$containerApp.fqdn)) {
     throw "Container App '$ContainerAppName' was not found in resource group '$ResourceGroupName' or does not expose an ingress FQDN."
 }
+
+Assert-PublishResourceId -Resource $containerApp -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $ContainerAppName
 
 $containerAppUrl = 'https://{0}' -f ([string]$containerApp.fqdn)
 $redirectUri = '{0}/.auth/login/aad/callback' -f $containerAppUrl

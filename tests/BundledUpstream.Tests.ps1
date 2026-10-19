@@ -8,7 +8,7 @@ Describe 'Bundled upstream release' {
             New-Item -Path (Join-Path $fixtureRoot $directory) -ItemType Directory -Force | Out-Null
         }
         foreach ($file in @(
-            'scripts/Resolve-UpstreamRepo.ps1', 'scripts/Common-AzurePublish.ps1', 'scripts/Publish-FunctionAppPackage.ps1',
+            'scripts/Publish-TargetGuard.ps1', 'scripts/Resolve-UpstreamRepo.ps1', 'scripts/Common-AzurePublish.ps1', 'scripts/Publish-FunctionAppPackage.ps1',
             'contracts/upstream-lock.json', 'contracts/upstream-package.json', 'contracts/released-function-app.json',
             'vendor/defender-reporting-source.zip', 'vendor/function-app-package.zip'
         )) {

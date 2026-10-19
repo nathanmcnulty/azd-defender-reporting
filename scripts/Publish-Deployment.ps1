@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [string]$ResourceGroupName = $env:AZURE_RESOURCE_GROUP,
     [string]$FunctionAppName,
     [string]$AutomationAccountName,
@@ -99,7 +101,7 @@ function Resolve-ComputeResourceNames {
     }
 }
 
-& (Join-Path $PSScriptRoot 'Validate-Environment.ps1') -ApplyDefaults -PersistAzdEnv -CommandName 'publish-deployment' | Out-Null
+& (Join-Path $PSScriptRoot 'Validate-Environment.ps1') -ApplyDefaults -CommandName 'publish-deployment' | Out-Null
 
 $ResourceGroupName = if ([string]::IsNullOrWhiteSpace($ResourceGroupName)) { Get-EnvironmentValue -Name 'AZURE_RESOURCE_GROUP' } else { $ResourceGroupName }
 $SecurityGroup = if ([string]::IsNullOrWhiteSpace($SecurityGroup)) { Get-EnvironmentValue -Name 'HOSTED_AUTH_SECURITY_GROUP' } else { $SecurityGroup }
@@ -114,6 +116,16 @@ $resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {
 }
 else {
     Resolve-BooleanString -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
+}
+
+# A fully specified plan is offline; discovery requires a verified explicit target.
+if (-not $PlanOnly -or -not $ResourceGroupName -or -not $StorageAccountName -or
+    ($mode.RequiresFunctionAppPublish -and -not $FunctionAppName) -or
+    ($mode.RequiresAutomationPublish -and -not $AutomationAccountName) -or
+    $mode.RequiresHostedSurface) {
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
 }
 
 $resolvedResourceGroupName = Resolve-ResourceGroupName `
@@ -159,7 +171,7 @@ if ($PlanOnly) {
     )
 
     if ($mode.RequiresHostedSurface) {
-        $hostedPlan = & (Join-Path $PSScriptRoot 'Publish-HostedSurface.ps1') `
+        $hostedPlan = & (Join-Path $PSScriptRoot 'Publish-HostedSurface.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
             -ResourceGroupName $resolvedResourceGroupName `
             -ContainerAppName ([string]$resolvedNames.ContainerAppName) `
             -StorageAccountName $resolvedStorageAccountName `
@@ -179,9 +191,22 @@ if ($PlanOnly) {
     return
 }
 
+# Bind every selected compute/host resource before the first template write.
+foreach ($selection in @(
+    @{ Enabled = $mode.RequiresFunctionAppPublish; Type = 'Microsoft.Web/sites'; Name = [string]$resolvedNames.FunctionAppName }
+    @{ Enabled = $mode.RequiresAutomationPublish; Type = 'Microsoft.Automation/automationAccounts'; Name = [string]$resolvedNames.AutomationAccountName }
+    @{ Enabled = $mode.RequiresHostedSurface; Type = 'Microsoft.App/containerApps'; Name = [string]$resolvedNames.ContainerAppName }
+)) {
+    if ($selection.Enabled) {
+        $resource = Get-AzCliJson -Arguments @('resource', 'show', '--resource-group', $resolvedResourceGroupName, '--resource-type', $selection.Type, '--name', $selection.Name, '--output', 'json')
+        Assert-PublishResourceId -Resource $resource -ResourceGroupName $resolvedResourceGroupName -ResourceType $selection.Type -Name $selection.Name
+    }
+}
+
 $templatePublishResult = if ($requiresTemplatePublish) {
-    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -StorageAccountName $resolvedStorageAccountName `
+        -ResourceGroupName $resolvedResourceGroupName `
         -RepositoryPath $RepositoryPath `
         -RepositoryUrl $RepositoryUrl `
         -Ref $Ref) | Where-Object {
@@ -199,7 +224,7 @@ if ($requiresTemplatePublish -and $null -eq $templatePublishResult) {
 $result | Add-Member -NotePropertyName TemplatePublish -NotePropertyValue $templatePublishResult
 
 if ($mode.RequiresFunctionAppPublish) {
-    $functionPublishResult = & (Join-Path $PSScriptRoot 'Publish-FunctionAppPackage.ps1') `
+    $functionPublishResult = & (Join-Path $PSScriptRoot 'Publish-FunctionAppPackage.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -ResourceGroupName $resolvedResourceGroupName `
         -FunctionAppName ([string]$resolvedNames.FunctionAppName) `
         -RepositoryPath $RepositoryPath `
@@ -211,7 +236,7 @@ if ($mode.RequiresFunctionAppPublish) {
 }
 
 if ($mode.RequiresAutomationPublish) {
-    $automationPublishResult = & (Join-Path $PSScriptRoot 'Publish-AutomationRunbook.ps1') `
+    $automationPublishResult = & (Join-Path $PSScriptRoot 'Publish-AutomationRunbook.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -ResourceGroupName $resolvedResourceGroupName `
         -AutomationAccountName ([string]$resolvedNames.AutomationAccountName) `
         -StorageAccountName $resolvedStorageAccountName `
@@ -224,7 +249,7 @@ if ($mode.RequiresAutomationPublish) {
 }
 
 if ($mode.RequiresHostedSurface) {
-    $hostedPublishResult = & (Join-Path $PSScriptRoot 'Publish-HostedSurface.ps1') `
+    $hostedPublishResult = & (Join-Path $PSScriptRoot 'Publish-HostedSurface.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -ResourceGroupName $resolvedResourceGroupName `
         -ContainerAppName ([string]$resolvedNames.ContainerAppName) `
         -StorageAccountName $resolvedStorageAccountName `

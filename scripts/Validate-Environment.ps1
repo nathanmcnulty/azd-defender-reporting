@@ -57,43 +57,18 @@ function Set-DeployerPrincipalDefaults {
         return
     }
 
-    $azPath = (Get-Command -Name 'az' -ErrorAction SilentlyContinue)?.Source
-    if (-not $azPath) {
-        return
-    }
-
-    try {
-        $principalType = (& $azPath account show --query user.type --output tsv 2>$null | Out-String).Trim()
-        if ([string]::IsNullOrWhiteSpace($principalType)) {
-            $principalType = 'user'
-        }
-
-        if ($principalType -eq 'user') {
-            $principalId = (& $azPath ad signed-in-user show --query id --output tsv 2>$null | Out-String).Trim()
-            if ([string]::IsNullOrWhiteSpace($principalId)) {
-                return
-            }
-
-            Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value $principalId
-            Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_TYPE' -Value 'User'
-            return
-        }
-
-        $servicePrincipalAppId = (& $azPath account show --query user.name --output tsv 2>$null | Out-String).Trim()
-        if ([string]::IsNullOrWhiteSpace($servicePrincipalAppId)) {
-            return
-        }
-
-        $servicePrincipalObjectId = (& $azPath ad sp show --id $servicePrincipalAppId --query id --output tsv 2>$null | Out-String).Trim()
-        if ([string]::IsNullOrWhiteSpace($servicePrincipalObjectId)) {
-            return
-        }
-
-        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value $servicePrincipalObjectId
+    Initialize-PublishTarget
+    $account = Get-AzCliJson -Arguments @('account', 'show', '--output', 'json')
+    if ($account.user.type -eq 'user') {
+        $principal = Invoke-AzRestJson -Method GET -Url 'https://graph.microsoft.com/v1.0/me?$select=id'
+        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value ([string]$principal.id)
+        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_TYPE' -Value 'User'
+    } else {
+        $appId = [guid]::Parse([string]$account.user.name).ToString()
+        $principal = Invoke-AzRestJson -Method GET -Url "https://graph.microsoft.com/v1.0/servicePrincipals?`$filter=appId%20eq%20'$appId'&`$select=id"
+        if (@($principal.value).Count -ne 1) { throw 'The selected deployer service principal is ambiguous.' }
+        Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_ID' -Value ([string]$principal.value[0].id)
         Set-ProcessAndAzdDefault -Name 'DEPLOYER_PRINCIPAL_TYPE' -Value 'ServicePrincipal'
-    }
-    catch {
-        Write-Verbose "Unable to determine deployer principal defaults. $_"
     }
 }
 
@@ -196,7 +171,8 @@ Set-ProcessAndAzdDefault -Name 'DEFENDER_REPORTING_REF' -Value ([string]$compati
     Import-AzdEnvironmentValue -Name $_ | Out-Null
 }
 
-Set-DeployerPrincipalDefaults
+# Offline validation and publication do not infer an ambient deployer identity.
+if ($CommandName -eq 'preprovision') { Set-DeployerPrincipalDefaults }
 
 $mode = & (Join-Path $scriptRoot 'Get-DeploymentMode.ps1')
 $resolvedSkipHostedAuthSetup = Resolve-BooleanString -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false

@@ -96,3 +96,57 @@ Local validation proves:
 Optional live publish validation can now exercise the full Flex Consumption publish path, the Automation publish path, and the hosted Container App surface once a real Azure environment exists and the signed-in operator has blob data access to the wrapper storage account.
 
 Live validation is intentionally separate because it mutates Azure resources and requires credentials; ordinary pull-request validation remains deterministic and Azure-free.
+
+## Explicit operator publication target (issue #23)
+
+All maintained publication entrypoints accept `-SubscriptionId` and `-TenantId`.
+When omitted, they resolve `AZURE_SUBSCRIPTION_ID` and `AZURE_TENANT_ID` from the
+process or selected azd environment. CLI defaults never establish approval and
+are never changed. `Deploy.ps1` additionally requires the selected azd environment
+to match both selectors before provisioning; publication-only execution can use
+`-SkipProvision`. The read-only smoke entrypoint receives the same selectors.
+
+The local operator guard adapts the subscription/tenant/Enabled checks reviewed
+in azd-reference commit `59522c4` (PR #131). A scoped CLI account check and a newly
+acquired, metadata-verified ARM token precede a fresh subscription GET. Only an
+exact subscription ID, tenant ID and `Enabled` state pass. Every mutation gets
+another fresh check, including cache hits, template files and OneDeploy retries.
+Discovered compute/storage IDs must match the requested subscription, resource
+group, type and name. Public-cloud storage endpoints must match the bound account.
+Graph tokens are selected by tenant (CLI disallows combining tenant and subscription
+selectors); ARM/storage tokens are selected by subscription and verify both fields.
+Caches include resource, subscription and tenant. This operator-only adaptation does
+not import the unrelated hosted runtime or require a network fetch from Reference.
+
+The frozen upstream template publisher uses ambient authentication. The maintained
+wrapper therefore reuses its offline template-state/manifest helpers but owns the
+bound HTTP uploads. The upstream archive, release package, compatibility hashes and
+manifest shape are unchanged; no upstream publishing/authentication helper is called.
+Metadata is written only after all uploads succeed. Publication errors fail closed
+without fallback login or automatic replay of template uploads.
+
+`-BuildOnly` remains authentication-free. Fully specified non-hosted
+`Publish-Deployment.ps1 -PlanOnly` is offline; plans requiring discovery or hosted
+auth inspection require target validation. Hosted planning never uploads templates.
+`Validate-Repository.ps1 -ValidateAllUpstreamContracts` remains offline (Bicep and
+local Az.Accounts build input are required). Automatic deployer identity discovery
+is confined to preprovision and uses the verified target; ordinary validation does
+not consult ambient identities.
+
+`tests/PublisherTarget.Tests.ps1` invokes actual maintained entrypoints using strict
+native/HTTP tripwires. It covers malformed/missing selectors, cached Enabled versus
+fresh Disabled, wrong/malformed/failed ARM reads, wrong token metadata, exact resource
+bindings, state changes after the first write, cross-target cache isolation,
+non-default valid targets, Function/Automation orchestration, hosted auth and offline
+paths. Tests do not authenticate or perform live writes. Passing source tests or CI
+is not publisher/Azure qualification; issue #20 and REPORT-002 retain the approved
+native deployment, workload, delivery and cleanup gates.
+
+Source validation for this change: PowerShell 7.6.6 / .NET 10.0.12 / Pester 6.2.0:
+109 tests passed, zero failures/skips/inconclusive/not-run outcomes. Full
+`Validate-Repository.ps1 -ValidateAllUpstreamContracts` passed, including Bicep
+0.42.1 compilation, Function rebuild, Automation generation, template contract and
+hosted assets. The local Function rebuild used Az.Accounts 5.5.0 extracted from the
+already SHA-256-locked release package, with no authentication or module fetch.
+Canonical backlog schema/generated-view checks and `git diff --check` passed.
+These are offline source checks only; no live publisher or Azure outcome is claimed.

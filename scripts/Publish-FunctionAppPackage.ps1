@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [string]$ResourceGroupName,
     [string]$FunctionAppName,
     [string]$RepositoryPath = $env:DEFENDER_REPORTING_PATH,
@@ -76,7 +78,7 @@ function Get-FunctionAppDeploymentStorage {
         '--resource-type', 'Microsoft.Web/sites',
         '--name', $FunctionAppName,
         '--api-version', '2024-04-01',
-        '--query', '{deploymentContainerUrl:properties.functionAppConfig.deployment.storage.value}',
+        '--query', '{id:id,deploymentContainerUrl:properties.functionAppConfig.deployment.storage.value}',
         '--output', 'json'
     )
 
@@ -84,8 +86,13 @@ function Get-FunctionAppDeploymentStorage {
         throw "Function App '$FunctionAppName' does not expose functionAppConfig.deployment.storage.value. The Flex Consumption deployment container is missing."
     }
 
+    Assert-PublishResourceId -Resource $resource -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.Web/sites' -Name $FunctionAppName
     $deploymentContainerUri = [System.Uri]::new([string]$resource.deploymentContainerUrl)
+    if ($deploymentContainerUri.Scheme -cne 'https' -or $deploymentContainerUri.Host -notmatch '\A[a-z0-9]{3,24}\.blob\.core\.windows\.net\z' -or
+        $deploymentContainerUri.Port -ne 443 -or $deploymentContainerUri.Query -or $deploymentContainerUri.Fragment -or $deploymentContainerUri.UserInfo -or
+        $deploymentContainerUri.AbsolutePath -notmatch '\A/[a-z0-9][a-z0-9-]{1,61}[a-z0-9]\z') { throw 'Invalid deployment storage endpoint.' }
     $storageAccountName = $deploymentContainerUri.Host.Split('.')[0]
+    Assert-PublishStorage -StorageAccountName $storageAccountName -ResourceGroupName $ResourceGroupName
     $containerName = $deploymentContainerUri.AbsolutePath.Trim('/')
 
     if ([string]::IsNullOrWhiteSpace($storageAccountName) -or [string]::IsNullOrWhiteSpace($containerName)) {
@@ -129,7 +136,8 @@ function Publish-ReleasedPackageBlob {
         [string]$PackagePath
     )
 
-    $uploadOutput = @(az storage blob upload `
+    Assert-PublishTarget
+    $uploadOutput = @(az storage blob upload --subscription $SubscriptionId `
         --auth-mode login `
         --account-name $StorageAccountName `
         --container-name $ContainerName `
@@ -145,7 +153,8 @@ function Publish-ReleasedPackageBlob {
     }
 
     $sasExpiry = (Get-Date).ToUniversalTime().AddHours(2).ToString('yyyy-MM-ddTHH:mmZ')
-    $sasOutput = @(az storage blob generate-sas `
+    Assert-PublishTarget
+    $sasOutput = @(az storage blob generate-sas --subscription $SubscriptionId `
         --auth-mode login `
         --as-user `
         --account-name $StorageAccountName `
@@ -214,7 +223,8 @@ resource oneDeploy 'Microsoft.Web/sites/extensions@2022-09-01' = {
     try {
         for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
             $deploymentName = 'onedeploy-{0}-{1}' -f $FunctionAppName, $attempt
-            $deployOutput = @(az deployment group create `
+            Assert-PublishTarget
+            $deployOutput = @(az deployment group create --subscription $SubscriptionId `
                 --resource-group $ResourceGroupName `
                 --name $deploymentName `
                 --template-file $templatePath `
@@ -336,6 +346,10 @@ if ($BuildOnly) {
     return
 }
 
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
 if ([string]::IsNullOrWhiteSpace($ResourceGroupName) -or [string]::IsNullOrWhiteSpace($FunctionAppName)) {
     throw 'ResourceGroupName and FunctionAppName are required unless -BuildOnly is specified.'
 }
@@ -355,8 +369,9 @@ $templatePublishResult = if ($SkipTemplatePublish) {
     }
 }
 else {
-    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -StorageAccountName $deploymentStorage.StorageAccountName `
+        -ResourceGroupName $ResourceGroupName `
         -RepositoryPath $upstreamRepo.ResolvedPath) | Where-Object {
         $_ -is [psobject] -and $_.PSObject.Properties.Match('ContainerName').Count -gt 0
     } | Select-Object -Last 1

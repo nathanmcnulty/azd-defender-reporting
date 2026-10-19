@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [string]$ResourceGroupName,
     [string]$AutomationAccountName,
     [string]$StorageAccountName,
@@ -45,24 +47,6 @@ function Test-IsArmNotFoundError {
     return ($text -match '(?i)\b(HTTP\s*404|StatusCode\s*:?\s*404|ResourceGroupNotFound|ResourceNotFound|NotFound|could not be found|was not found)\b')
 }
 
-function Get-ArmAccessToken {
-    [CmdletBinding()]
-    param()
-
-    $tokenText = Get-AzCliText -Arguments @(
-        'account', 'get-access-token',
-        '--resource', 'https://management.azure.com/',
-        '--query', 'accessToken',
-        '--output', 'tsv'
-    )
-
-    if ([string]::IsNullOrWhiteSpace($tokenText)) {
-        throw 'Unable to acquire an Azure Resource Manager access token.'
-    }
-
-    return $tokenText.Trim()
-}
-
 function Invoke-ArmApi {
     [CmdletBinding()]
     param(
@@ -83,11 +67,12 @@ function Invoke-ArmApi {
     }
 
     $headers = @{
-        Authorization = "Bearer $(Get-ArmAccessToken)"
+        Authorization = "Bearer $(Get-AzAccessToken -Url $requestUri)"
     }
 
+    Assert-PublishTarget
     if ($Method -eq 'GET' -or $Method -eq 'DELETE') {
-        return Invoke-RestMethod -Uri $requestUri -Method $Method -Headers $headers
+        return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers
     }
 
     if (-not [string]::IsNullOrWhiteSpace($ContentType)) {
@@ -95,10 +80,10 @@ function Invoke-ArmApi {
     }
 
     if ($PSBoundParameters.ContainsKey('Payload')) {
-        return Invoke-RestMethod -Uri $requestUri -Method $Method -Headers $headers -Body $Payload
+        return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers -Body $Payload
     }
 
-    return Invoke-RestMethod -Uri $requestUri -Method $Method -Headers $headers
+    return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers
 }
 
 function Get-OptionalArmResource {
@@ -312,6 +297,10 @@ if ($BuildOnly) {
     return
 }
 
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
 if ([string]::IsNullOrWhiteSpace($ResourceGroupName) -or [string]::IsNullOrWhiteSpace($AutomationAccountName)) {
     throw 'ResourceGroupName and AutomationAccountName are required unless -BuildOnly is specified.'
 }
@@ -333,17 +322,17 @@ if ($null -eq $automationAccount -or [string]::IsNullOrWhiteSpace([string]$autom
     throw "Automation Account '$AutomationAccountName' was not found in resource group '$ResourceGroupName'."
 }
 
+Assert-PublishResourceId -Resource $automationAccount -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.Automation/automationAccounts' -Name $AutomationAccountName
+
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName
 
-if (-not $SkipTemplatePublish) {
-    & (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
-        -StorageAccountName $resolvedStorageAccountName `
-        -RepositoryPath $upstreamRepo.ResolvedPath | Out-Null
-}
+Assert-PublishStorage -StorageAccountName $resolvedStorageAccountName -ResourceGroupName $ResourceGroupName
 
-$subscriptionId = (Get-AzCliText -Arguments @('account', 'show', '--query', 'id', '--output', 'tsv')).Trim()
-if ([string]::IsNullOrWhiteSpace($subscriptionId)) {
-    throw 'Unable to determine the current Azure subscription ID.'
+if (-not $SkipTemplatePublish) {
+    & (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
+        -StorageAccountName $resolvedStorageAccountName `
+        -ResourceGroupName $ResourceGroupName `
+        -RepositoryPath $upstreamRepo.ResolvedPath | Out-Null
 }
 
 $subscriptionPath = "/subscriptions/$subscriptionId"

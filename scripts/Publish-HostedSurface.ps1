@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [string]$ContainerAppName,
     [string]$ResourceGroupName,
     [string]$StorageAccountName,
@@ -19,6 +21,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
 
 function Invoke-HostedSurfaceProbe {
     [CmdletBinding()]
@@ -96,8 +103,23 @@ else {
     Resolve-BooleanString -Value (Get-EnvironmentValue -Name 'SKIP_HOSTED_AUTH_SETUP') -Default $false
 }
 
+$containerApp = Get-AzCliJson -Arguments @(
+    'resource', 'show',
+    '--resource-group', $ResourceGroupName,
+    '--resource-type', 'Microsoft.App/containerApps',
+    '--name', $ContainerAppName,
+    '--query', '{id:id,fqdn:properties.configuration.ingress.fqdn,provisioningState:properties.provisioningState}',
+    '--output', 'json'
+)
+
+if ($null -eq $containerApp -or [string]::IsNullOrWhiteSpace([string]$containerApp.fqdn)) {
+    throw "Container App '$ContainerAppName' was not found in resource group '$ResourceGroupName' or does not expose an ingress FQDN."
+}
+
+Assert-PublishResourceId -Resource $containerApp -ResourceGroupName $ResourceGroupName -ResourceType 'Microsoft.App/containerApps' -Name $ContainerAppName
+
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName
-$templatePublishResult = if ($SkipTemplatePublish) {
+$templatePublishResult = if ($SkipTemplatePublish -or $PlanOnly) {
     [PSCustomObject]@{
         StorageAccountName = $resolvedStorageAccountName
         ContainerName = 'templates'
@@ -105,8 +127,9 @@ $templatePublishResult = if ($SkipTemplatePublish) {
     }
 }
 else {
-    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') `
+    @(& (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
         -StorageAccountName $resolvedStorageAccountName `
+        -ResourceGroupName $ResourceGroupName `
         -RepositoryPath $RepositoryPath `
         -RepositoryUrl $RepositoryUrl `
         -Ref $Ref) | Where-Object {
@@ -116,19 +139,6 @@ else {
 
 if ($null -eq $templatePublishResult) {
     throw 'Publish-TemplateAssets.ps1 did not return the expected template publish result.'
-}
-
-$containerApp = Get-AzCliJson -Arguments @(
-    'resource', 'show',
-    '--resource-group', $ResourceGroupName,
-    '--resource-type', 'Microsoft.App/containerApps',
-    '--name', $ContainerAppName,
-    '--query', '{fqdn:properties.configuration.ingress.fqdn,provisioningState:properties.provisioningState}',
-    '--output', 'json'
-)
-
-if ($null -eq $containerApp -or [string]::IsNullOrWhiteSpace([string]$containerApp.fqdn)) {
-    throw "Container App '$ContainerAppName' was not found in resource group '$ResourceGroupName' or does not expose an ingress FQDN."
 }
 
 $containerAppUrl = 'https://{0}' -f ([string]$containerApp.fqdn)
@@ -143,7 +153,7 @@ $result = [PSCustomObject]@{
     SkipAuthSetup = $resolvedSkipAuthSetup
 }
 
-$authResult = & (Join-Path $PSScriptRoot 'Set-HostedSurfaceAuth.ps1') `
+$authResult = & (Join-Path $PSScriptRoot 'Set-HostedSurfaceAuth.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
     -ResourceGroupName $ResourceGroupName `
     -ContainerAppName $ContainerAppName `
     -SecurityGroup $SecurityGroup `

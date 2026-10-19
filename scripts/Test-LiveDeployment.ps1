@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [Parameter(Mandatory = $true)]
     [string]$ResourceGroupName,
     [string]$StorageAccountName,
@@ -15,6 +17,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
 
 function Test-DashboardBlob {
     [CmdletBinding()]

@@ -2,6 +2,8 @@
 
 [CmdletBinding()]
 param(
+    [string]$SubscriptionId,
+    [string]$TenantId,
     [string]$ResourceGroupName = $env:AZURE_RESOURCE_GROUP,
     [switch]$PlanOnly,
     [switch]$SkipProvision,
@@ -16,7 +18,12 @@ $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
 
-if (-not (Get-Command -Name 'azd' -ErrorAction SilentlyContinue)) {
+Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
+$SubscriptionId = $script:PublishTarget.SubscriptionId
+$TenantId = $script:PublishTarget.TenantId
+
+
+if ((-not $SkipProvision -or $PlanOnly) -and -not (Get-Command -Name 'azd' -ErrorAction SilentlyContinue)) {
     throw 'Azure Developer CLI (azd) is required.'
 }
 
@@ -24,7 +31,16 @@ if (-not $SkipValidation) {
     & (Join-Path $PSScriptRoot 'Validate-Repository.ps1') -ValidateAllUpstreamContracts
 }
 
+if (-not $SkipProvision -or $PlanOnly) {
+    $selected = Get-AzdEnvironmentValues
+    if (-not $selected.ContainsKey('AZURE_SUBSCRIPTION_ID') -or -not $selected.ContainsKey('AZURE_TENANT_ID') -or
+        $selected['AZURE_SUBSCRIPTION_ID'] -ine $SubscriptionId -or $selected['AZURE_TENANT_ID'] -ine $TenantId) {
+        throw 'The selected azd environment must match the explicit subscription and tenant before provisioning.'
+    }
+}
+
 if ($PlanOnly) {
+    Assert-PublishTarget
     & azd provision --preview
     if ($LASTEXITCODE -ne 0) {
         throw 'azd provision --preview failed.'
@@ -33,6 +49,7 @@ if ($PlanOnly) {
 }
 
 if (-not $SkipProvision) {
+    Assert-PublishTarget
     & azd provision
     if ($LASTEXITCODE -ne 0) {
         throw 'azd provision failed.'
@@ -50,12 +67,12 @@ if (-not $SkipPublish) {
     if ([string]::IsNullOrWhiteSpace($resolvedResourceGroupName)) {
         throw 'ResourceGroupName could not be resolved after provisioning.'
     }
-    & (Join-Path $PSScriptRoot 'Publish-Deployment.ps1') -ResourceGroupName $resolvedResourceGroupName
+    & (Join-Path $PSScriptRoot 'Publish-Deployment.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -ResourceGroupName $resolvedResourceGroupName
 }
 
 if ($RunSmokeTest) {
     if ([string]::IsNullOrWhiteSpace($resolvedResourceGroupName)) {
         throw 'ResourceGroupName is required for live smoke testing.'
     }
-    & (Join-Path $PSScriptRoot 'Test-LiveDeployment.ps1') -ResourceGroupName $resolvedResourceGroupName -AccessToken $AccessToken
+    & (Join-Path $PSScriptRoot 'Test-LiveDeployment.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -ResourceGroupName $resolvedResourceGroupName -AccessToken $AccessToken
 }
