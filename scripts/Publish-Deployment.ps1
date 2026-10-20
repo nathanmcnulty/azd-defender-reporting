@@ -15,6 +15,7 @@ param(
     [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
     [switch]$PlanOnly,
+    [switch]$ManualOnly,
     [switch]$SkipAuthSetup
 )
 
@@ -111,6 +112,7 @@ $RepositoryUrl = if ([string]::IsNullOrWhiteSpace($RepositoryUrl)) { Get-Environ
 $Ref = if ([string]::IsNullOrWhiteSpace($Ref)) { Get-EnvironmentValue -Name 'DEFENDER_REPORTING_REF' } else { $Ref }
 
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
+if ($ManualOnly) { Assert-ManualAutomationMode -Mode $mode }
 $resolvedSkipAuthSetup = if ($PSBoundParameters.ContainsKey('SkipAuthSetup')) {
     [bool]$SkipAuthSetup
 }
@@ -160,13 +162,17 @@ $result = [PSCustomObject]@{
     AutomationAccountName = [string]$resolvedNames.AutomationAccountName
     ContainerAppName = [string]$resolvedNames.ContainerAppName
     SkipAuthSetup = $resolvedSkipAuthSetup
+    ManualOnly = [bool]$ManualOnly
 }
 
 if ($PlanOnly) {
     $result | Add-Member -NotePropertyName Operations -NotePropertyValue @(
         if ($requiresTemplatePublish) { 'Publish template assets' }
         if ($mode.RequiresFunctionAppPublish) { 'Publish Function App package' }
-        if ($mode.RequiresAutomationPublish) { 'Publish Automation runbook' }
+        if ($mode.RequiresAutomationPublish) {
+            if ($ManualOnly) { 'Publish Automation runbook without schedules (requires a schedule-free account)' }
+            else { 'Publish Automation runbook' }
+        }
         if ($mode.RequiresHostedSurface) { 'Publish hosted surface and configure auth' }
     )
 
@@ -201,6 +207,10 @@ foreach ($selection in @(
         $resource = Get-AzCliJson -Arguments @('resource', 'show', '--resource-group', $resolvedResourceGroupName, '--resource-type', $selection.Type, '--name', $selection.Name, '--output', 'json')
         Assert-PublishResourceId -Resource $resource -ResourceGroupName $resolvedResourceGroupName -ResourceType $selection.Type -Name $selection.Name
     }
+}
+
+if ($ManualOnly) {
+    Assert-AutomationSchedulesAbsent -ResourceGroupName $resolvedResourceGroupName -AutomationAccountName ([string]$resolvedNames.AutomationAccountName)
 }
 
 $templatePublishResult = if ($requiresTemplatePublish) {
@@ -243,6 +253,7 @@ if ($mode.RequiresAutomationPublish) {
         -RepositoryPath $RepositoryPath `
         -RepositoryUrl $RepositoryUrl `
         -Ref $Ref `
+        -ManualOnly:$ManualOnly `
         -SkipTemplatePublish
 
     $result | Add-Member -NotePropertyName AutomationPublish -NotePropertyValue $automationPublishResult

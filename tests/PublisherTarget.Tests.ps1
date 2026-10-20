@@ -52,6 +52,7 @@ BeforeAll {
     }
     function global:Invoke-RestMethod {
         param($Uri,$Method,$Headers,$MaximumRedirection,$TimeoutSec,$Body)
+        $global:pub.Requests.Add([pscustomobject]@{Uri=[string]$Uri;Method=[string]$Method;Body=$Body})
         if ($Uri -match '/subscriptions/[^/?]+\?api-version=2022-12-01$' -and $Method -eq 'Get') {
             $global:pub.Reads++
             if($global:pub.ReadFailure){throw 'Fixture fresh read failure'}
@@ -65,6 +66,33 @@ BeforeAll {
     }
     function global:Invoke-WebRequest {
         param($Uri,$Method,$Headers,$MaximumRedirection,$TimeoutSec,$Body,$ContentType,$InFile,$UseBasicParsing,$SkipHttpErrorCheck)
+        $global:pub.Requests.Add([pscustomobject]@{Uri=[string]$Uri;Method=[string]$Method;Body=$Body})
+        if ($Method -eq 'GET' -and $Uri -match '/(schedules|jobSchedules)\?') {
+            $collection=$Matches[1]
+            if($global:pub.ScheduleReadFailure){throw 'Fixture schedule read failure'}
+            $value=switch($global:pub.ScheduleState){
+                'Malformed' {@{unexpected='missing value'}}
+                'NullValue' {@{value=$null}}
+                'ScalarValue' {@{value='not an array'}}
+                'Paged' {@{value=@();nextLink='https://management.azure.com/more'}}
+                'ArrayNextLink' {@{value=@();nextLink=@()}}
+                'NumericNextLink' {@{value=@();nextLink=0}}
+                'WhitespaceNextLink' {@{value=@();nextLink=' '}}
+                'NullNextLink' {@{value=@();nextLink=$null}}
+                'EmptyNextLink' {@{value=@();nextLink=''}}
+                'ExistingSchedule' {if($collection -eq 'schedules'){@{value=@(@{name='existing'})}}else{@{value=@()}}}
+                'ExistingLink' {if($collection -eq 'jobSchedules'){@{value=@(@{name='existing-link'})}}else{@{value=@()}}}
+                default {@{value=@()}}
+            }
+            $content=switch($global:pub.ScheduleState){
+                'ArrayRoot' {'[{"value":[]}]'}
+                'NullRoot' {'null'}
+                'InvalidJson' {'not-json'}
+                default {ConvertTo-Json -InputObject $value -Depth 10}
+            }
+            $statusCode=switch($global:pub.ScheduleState){'PartialResponse'{206};'HttpFailure'{500};default{200}}
+            return @{StatusCode=$statusCode;Content=$content}
+        }
         if($Method -ne 'Get'){$global:pub.Writes.Add("HTTP $Method $Uri")}
         $value = if($Uri -match '/authConfigs/'){@{properties=@{platform=@{enabled=$false};identityProviders=$null}}}
             elseif($Uri -match '/applications' -and $Method -eq 'GET'){@{value=@()}}
@@ -78,7 +106,7 @@ BeforeAll {
 }
 BeforeEach {
     Mock Get-Command -MockWith { if ($Name -eq 'azd') { return $null }; & $global:PublisherRealGetCommand -Name $Name -ErrorAction SilentlyContinue }
-    $global:pub = @{Subscription=$subscription;Tenant=$tenant;State='Enabled';Reads=0;DisableAfter=[int]::MaxValue;ReadFailure=$false;Malformed=$false;TokenMismatch=$false;TokenTenantMismatch=$false;GraphMismatch=$false;ArmSubscription=$subscription;ArmTenant=$tenant;ResourceMismatch=$false;ResourceMismatchType='';Cli=[Collections.Generic.List[string]]::new();Writes=[Collections.Generic.List[string]]::new();TokenRequests=[Collections.Generic.List[string]]::new()}
+    $global:pub = @{Subscription=$subscription;Tenant=$tenant;State='Enabled';Reads=0;DisableAfter=[int]::MaxValue;ReadFailure=$false;Malformed=$false;TokenMismatch=$false;TokenTenantMismatch=$false;GraphMismatch=$false;ArmSubscription=$subscription;ArmTenant=$tenant;ResourceMismatch=$false;ResourceMismatchType='';ScheduleState='Empty';ScheduleReadFailure=$false;Requests=[Collections.Generic.List[object]]::new();Cli=[Collections.Generic.List[string]]::new();Writes=[Collections.Generic.List[string]]::new();TokenRequests=[Collections.Generic.List[string]]::new()}
     $env:COMPUTE_KIND='functionapp';$env:WEB_KIND='none';$env:DASHBOARD_PACKAGE_MODE='auto'
     foreach($name in @('computeKindResolved','webKindResolved','dashboardPackageModeResolved')){[Environment]::SetEnvironmentVariable($name,$null)}
 }
@@ -152,6 +180,73 @@ AfterAll {
         & "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -SkipTemplatePublish | Out-Null
         $global:pub.Writes.Count | Should -BeGreaterThan 8
         foreach($write in $global:pub.Writes){$write | Should -Match "/subscriptions/$subscription/"}
+        $schedule=@($global:pub.Requests | Where-Object {$_.Method -eq 'PUT' -and $_.Uri -match '/schedules/DashboardPipeline-Daily\?'})
+        $schedule.Count | Should -Be 1
+        $payload=$schedule[0].Body | ConvertFrom-Json
+        $payload.properties.isEnabled | Should -BeTrue
+        $payload.properties.frequency | Should -Be 'Day'
+        $payload.properties.interval | Should -Be 1
+        @($global:pub.Requests | Where-Object {$_.Method -eq 'PUT' -and $_.Uri -match '/jobSchedules/'}).Count | Should -Be 1
+    }
+    It 'publishes manual-only Automation through <Entry> without changing schedules or starting jobs' -ForEach @(
+        @{Entry='Publish-AutomationRunbook'},@{Entry='Publish-Deployment'},@{Entry='Deploy'}
+    ) {
+        $env:COMPUTE_KIND='automation'
+        $parameters=@{}+$target
+        $parameters.ResourceGroupName='rg';$parameters.ManualOnly=$true
+        if($Entry -eq 'Deploy'){$parameters.SkipProvision=$true;$parameters.SkipValidation=$true}
+        else {$parameters.AutomationAccountName='aa';$parameters.StorageAccountName='reportstore'}
+        $result=@(& "$root/scripts/$Entry.ps1" @parameters) | Where-Object {$_.PSObject.Properties['ManualOnly']} | Select-Object -Last 1
+        $result.ManualOnly | Should -BeTrue
+        if($Entry -eq 'Publish-AutomationRunbook'){$result.ScheduleName | Should -Be ''}
+        else {$result.AutomationPublish.ManualOnly | Should -Contain $true}
+        @($global:pub.Writes | Where-Object {$_ -match '/(schedules|jobSchedules|jobs)(/|\?)'}).Count | Should -Be 0
+        @($global:pub.Writes | Where-Object {$_ -match '/runbooks/Invoke-DashboardPipeline/publish\?'}).Count | Should -Be 1
+        @($global:pub.Requests | Where-Object {$_.Method -eq 'GET' -and $_.Uri -match '/(schedules|jobSchedules)\?'}).Count | Should -BeGreaterOrEqual 2
+    }
+    It 'rejects unsafe manual-only scheduling state before any write through <Entry> (<State>)' -ForEach @(
+        foreach($entry in @('Publish-AutomationRunbook','Publish-Deployment')){
+            foreach($state in @('ExistingSchedule','ExistingLink','Malformed','NullValue','ScalarValue','Paged','FailedRead',
+                'PartialResponse','ArrayRoot','ArrayNextLink','NumericNextLink','WhitespaceNextLink','NullRoot','InvalidJson','HttpFailure')){
+                @{Entry=$entry;State=$state}
+            }
+        }
+    ) {
+        $env:COMPUTE_KIND='automation'
+        $global:pub.ScheduleState=$State
+        $global:pub.ScheduleReadFailure=($State -eq 'FailedRead')
+        $expectedError=if($State -eq 'FailedRead'){'*Fixture schedule read failure*'}else{'*ManualOnly*'}
+        {& "$root/scripts/$Entry.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly | Out-Null} | Should -Throw $expectedError
+        $global:pub.Writes.Count | Should -Be 0
+    }
+    It 'accepts a complete empty manual-only inventory with <State>' -ForEach @(
+        @{State='NullNextLink'},@{State='EmptyNextLink'}
+    ) {
+        $env:COMPUTE_KIND='automation'
+        $global:pub.ScheduleState=$State
+        $result=& "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly
+        $result.ManualOnly | Should -BeTrue
+        @($global:pub.Writes | Where-Object {$_ -match '/(schedules|jobSchedules|jobs)(/|\?)'}).Count | Should -Be 0
+    }
+    It 'rejects manual-only mode on <Compute>/<Web>/<Package> before any write through <Entry>' -ForEach @(
+        foreach($entry in @('Publish-AutomationRunbook','Publish-Deployment','Deploy')){
+            @{Entry=$entry;Compute='functionapp';Web='none';Package='auto'}
+            @{Entry=$entry;Compute='automation';Web='containerapp';Package='auto'}
+            @{Entry=$entry;Compute='automation';Web='none';Package='dual'}
+        }
+    ) {
+        $env:COMPUTE_KIND=$Compute;$env:WEB_KIND=$Web;$env:DASHBOARD_PACKAGE_MODE=$Package
+        {& "$root/scripts/$Entry.ps1" @target -ResourceGroupName rg -ManualOnly | Out-Null} | Should -Throw '*ManualOnly requires*'
+        $global:pub.Writes.Count | Should -Be 0
+    }
+    It 'keeps manual-only BuildOnly and fully specified planning offline without claiming scheduling readback' {
+        $env:COMPUTE_KIND='automation'
+        & "$root/scripts/Publish-AutomationRunbook.ps1" -ManualOnly -BuildOnly | Out-Null
+        $plan=& "$root/scripts/Publish-Deployment.ps1" -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -PlanOnly
+        $plan.ManualOnly | Should -BeTrue
+        $plan.Operations | Should -Contain 'Publish Automation runbook without schedules (requires a schedule-free account)'
+        $global:pub.Cli.Count | Should -Be 0
+        $global:pub.Requests.Count | Should -Be 0
     }
     It 'stops Automation after one mutation even with a cached token' {
         $global:pub.DisableAfter=1

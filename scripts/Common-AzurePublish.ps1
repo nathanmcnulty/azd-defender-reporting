@@ -410,6 +410,64 @@ function Resolve-SingleResourceNameInGroup {
     return [string]$resourceNames[0]
 }
 
+function Assert-ManualAutomationMode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory = $true)]$Mode)
+
+    if ($Mode.ComputeKind -ne 'automation' -or $Mode.WebKind -ne 'none' -or $Mode.EffectivePackageMode -ne 'selfcontained') {
+        throw '-ManualOnly requires COMPUTE_KIND=automation, WEB_KIND=none and selfcontained package mode.'
+    }
+}
+
+function Assert-AutomationSchedulesAbsent {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)][string]$ResourceGroupName,
+        [Parameter(Mandatory = $true)][string]$AutomationAccountName
+    )
+
+    $account = Get-AzCliJson -Arguments @(
+        'resource', 'show', '--resource-group', $ResourceGroupName,
+        '--resource-type', 'Microsoft.Automation/automationAccounts',
+        '--name', $AutomationAccountName, '--output', 'json'
+    )
+    Assert-PublishResourceId -Resource $account -ResourceGroupName $ResourceGroupName `
+        -ResourceType 'Microsoft.Automation/automationAccounts' -Name $AutomationAccountName
+
+    foreach ($collection in @('schedules', 'jobSchedules')) {
+        $url = "https://management.azure.com$($account.id)/${collection}?api-version=2023-11-01"
+        $headers = @{
+            Authorization = 'Bearer {0}' -f (Get-AzAccessToken -Url $url)
+            Accept = 'application/json'
+        }
+        Assert-PublishTarget
+        $httpResponse = Invoke-WebRequest -Method GET -Uri $url -Headers $headers `
+            -UseBasicParsing:$true -SkipHttpErrorCheck:$true -MaximumRedirection 0 -TimeoutSec 120
+        if ([int]$httpResponse.StatusCode -ne 200) {
+            throw "-ManualOnly could not read the complete '$collection' inventory (HTTP $($httpResponse.StatusCode))."
+        }
+        # Preserve and validate the root shape here, before PowerShell can
+        # enumerate a singleton array through a helper's return pipeline.
+        try {
+            $response = ConvertFrom-Json -InputObject ([string]$httpResponse.Content) -NoEnumerate -ErrorAction Stop
+        }
+        catch {
+            throw "-ManualOnly could not parse the '$collection' inventory as JSON."
+        }
+        # A partial, missing or malformed listing cannot establish an isolated,
+        # schedule-free account. Do not disable or delete another operator's work.
+        if ($response -isnot [pscustomobject] -or -not $response.PSObject.Properties['value'] -or
+            $response.value -isnot [array] -or $response.value.Count -ne 0) {
+            throw "-ManualOnly requires an Automation account with no schedules or job-schedule links; '$collection' was not confirmed empty."
+        }
+        $nextLink = $response.PSObject.Properties['nextLink']
+        if ($nextLink -and $null -ne $nextLink.Value -and
+            ($nextLink.Value -isnot [string] -or $nextLink.Value -ne '')) {
+            throw "-ManualOnly requires a complete '$collection' inventory with no continuation link."
+        }
+    }
+}
+
 function Resolve-StorageAccountName {
     [CmdletBinding()]
     param(

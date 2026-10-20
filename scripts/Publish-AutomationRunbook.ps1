@@ -11,6 +11,7 @@ param(
     [string]$RepositoryUrl = $env:DEFENDER_REPORTING_REPO,
     [string]$Ref = $env:DEFENDER_REPORTING_REF,
     [switch]$BuildOnly,
+    [switch]$ManualOnly,
     [switch]$SkipTemplatePublish
 )
 
@@ -200,6 +201,7 @@ function Remove-AutomationJobSchedulesByScheduleName {
 }
 
 $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
+if ($ManualOnly) { Assert-ManualAutomationMode -Mode $mode }
 $dashboardDeliveryMode = Get-DashboardDeliveryMode -EffectivePackageMode $mode.EffectivePackageMode
 
 $upstreamRepo = & (Join-Path $PSScriptRoot 'Resolve-UpstreamRepo.ps1') `
@@ -290,6 +292,7 @@ $result = [PSCustomObject]@{
     RunbookName = $runbookName
     RuntimeEnvironmentName = $runtimeEnvironmentName
     DashboardDeliveryMode = $dashboardDeliveryMode
+    ManualOnly = [bool]$ManualOnly
 }
 
 if ($BuildOnly) {
@@ -327,6 +330,10 @@ Assert-PublishResourceId -Resource $automationAccount -ResourceGroupName $Resour
 $resolvedStorageAccountName = Resolve-StorageAccountName -ResourceGroupName $ResourceGroupName -RequestedStorageAccountName $StorageAccountName
 
 Assert-PublishStorage -StorageAccountName $resolvedStorageAccountName -ResourceGroupName $ResourceGroupName
+
+if ($ManualOnly) {
+    Assert-AutomationSchedulesAbsent -ResourceGroupName $ResourceGroupName -AutomationAccountName $AutomationAccountName
+}
 
 if (-not $SkipTemplatePublish) {
     & (Join-Path $PSScriptRoot 'Publish-TemplateAssets.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId `
@@ -420,6 +427,13 @@ foreach ($automationVariable in $automationVariables) {
     } | ConvertTo-Json -Depth 5
 
     Invoke-ArmApi -Path $variablePath -Method PUT -Payload $variablePayload | Out-Null
+}
+
+if ($ManualOnly) {
+    $result | Add-Member -NotePropertyName StorageAccountName -NotePropertyValue $resolvedStorageAccountName
+    $result | Add-Member -NotePropertyName ScheduleName -NotePropertyValue ''
+    $result
+    return
 }
 
 $schedulePath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/schedules/${dailyScheduleName}?api-version=$automationAccountApiVersion"

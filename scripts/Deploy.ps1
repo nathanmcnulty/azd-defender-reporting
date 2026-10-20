@@ -9,6 +9,7 @@ param(
     [switch]$SkipProvision,
     [switch]$SkipPublish,
     [switch]$SkipValidation,
+    [switch]$ManualOnly,
     [switch]$RunSmokeTest,
     [string]$AccessToken
 )
@@ -17,6 +18,11 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+
+if ($ManualOnly) {
+    $mode = & (Join-Path $PSScriptRoot 'Get-DeploymentMode.ps1')
+    Assert-ManualAutomationMode -Mode $mode
+}
 
 Initialize-PublishTarget -SubscriptionId $SubscriptionId -TenantId $TenantId
 $SubscriptionId = $script:PublishTarget.SubscriptionId
@@ -67,7 +73,7 @@ if (-not $SkipPublish) {
     if ([string]::IsNullOrWhiteSpace($resolvedResourceGroupName)) {
         throw 'ResourceGroupName could not be resolved after provisioning.'
     }
-    & (Join-Path $PSScriptRoot 'Publish-Deployment.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -ResourceGroupName $resolvedResourceGroupName
+    & (Join-Path $PSScriptRoot 'Publish-Deployment.ps1') -SubscriptionId $SubscriptionId -TenantId $TenantId -ResourceGroupName $resolvedResourceGroupName -ManualOnly:$ManualOnly
 }
 
 if ($RunSmokeTest) {
