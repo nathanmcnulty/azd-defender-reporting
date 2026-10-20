@@ -97,6 +97,45 @@ Optional live publish validation can now exercise the full Flex Consumption publ
 
 Live validation is intentionally separate because it mutates Azure resources and requires credentials; ordinary pull-request validation remains deterministic and Azure-free.
 
+## Manual-only Automation validation (issue #26)
+
+For a separately approved, isolated `automation` / `none` / `selfcontained`
+validation cell, pass `-ManualOnly` to `Deploy.ps1`, `Publish-Deployment.ps1`, or
+`Publish-AutomationRunbook.ps1`. `auto` is accepted when it resolves to
+`selfcontained`. This explicit switch is not persisted in the azd environment.
+Omitting it preserves the production daily-schedule behavior.
+
+The maintained publisher still builds, verifies and publishes the locked
+runbook, its runtime, templates and variables. It creates no schedule, schedule
+association or job, and does not disable or delete existing scheduling. Before
+publication, it requires both the account's schedules and job-schedule links to
+be empty; existing, malformed, failed or incomplete listings stop the operation.
+Use a new dedicated account, not a shared account with unrelated schedules.
+The check is a readback, not a lock against another operator changing the account.
+
+`-BuildOnly` and fully specified `Publish-Deployment.ps1 -PlanOnly` remain offline.
+Their output describes the requested mode; it does not establish Azure scheduling
+state. `Deploy.ps1 -PlanOnly` still performs its existing guarded infrastructure
+preview. Do not rerun normal publication without `-ManualOnly` during this cell:
+normal publication intentionally enables the daily schedule.
+
+After separate approval, manually start the published runbook through the
+[Azure Automation ARM Jobs API](https://learn.microsoft.com/en-us/rest/api/automation/job/create?view=rest-automation-2024-10-23),
+using the same explicit subscription/tenant and fresh Enabled-state guard before
+each mutation. This supports Entra authentication without a Function host key,
+Automation webhook, storage key or new credential. Bind the exact account,
+runbook and job ID; reconcile an uncertain job submission rather than replaying it.
+Keep any bounded job count, timeout/stop policy and cleanup in the approval packet.
+
+A synthetic existing-export smoke must explicitly pass `UseExistingExportsOnly=true`,
+`IncludeAdvancedHunting=false`, `UseDirectMergeDeviceLookup=false`,
+`DashboardDeliveryMode=SelfContained` and `Export=BlobStorage`, with only approved
+synthetic inputs in the isolated account. It exercises the native runtime,
+managed-identity storage access and report output, not real Defender API access,
+live data export, daily scheduling or the other deployment-matrix cells.
+No deployment, job, role grant, data upload or cleanup is authorized by this
+documentation or by passing offline tests.
+
 ## Explicit operator publication target (issue #23)
 
 All maintained publication entrypoints accept `-SubscriptionId` and `-TenantId`.
