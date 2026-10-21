@@ -166,7 +166,7 @@ module automationStorageRoles 'modules/role-assignments.bicep' = if (computeKind
   params: {
     storageAccountName: storage.outputs.name
     principalId: automation!.outputs.identityPrincipalId
-    assignBlobOwner: true
+    assignBlobOwner: false
     assignBlobContributor: true
     assignQueueContributor: false
     assignTableContributor: false

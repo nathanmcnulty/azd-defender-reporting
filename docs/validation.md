@@ -136,6 +136,36 @@ live data export, daily scheduling or the other deployment-matrix cells.
 No deployment, job, role grant, data upload or cleanup is authorized by this
 documentation or by passing offline tests.
 
+## Automation runtime storage permissions
+
+New Automation deployments assign the runbook's managed identity **Storage Blob
+Data Contributor** on the wrapper storage account, without the redundant Blob
+Data Owner assignment. The locked runbook uses bearer-authenticated Blob
+operations to list/read inputs and templates, write exports/status/cache/report
+blobs, and delete or migrate its old artifacts. Those operations are covered by
+[Blob Data Contributor](https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles/storage#storage-blob-data-contributor).
+The [operation-to-permission mapping](https://learn.microsoft.com/en-us/rest/api/storageservices/authorize-with-azure-active-directory#permissions-for-calling-data-operations)
+also covers the optional blob tier set during upload. The runbook does not set
+filesystem ownership or ACLs, which are among the additional
+capabilities supplied by Blob Data Owner. This does not alter Defender API
+application permissions, dependency selection or native qualification gates.
+
+The separate Function identity, optional deployer identity and their existing
+role assignments are unchanged, as are default daily scheduling and manual-only
+publication behavior. `tests/AutomationRbac.Tests.ps1` compiles the actual Bicep
+module graph and checks the enabled role IDs, account scope, identity binding
+and unchanged Function/deployer role sets. Bicep must be installed before tests;
+the tests perform no login or deployment.
+
+**Existing deployments require a separate migration decision.**
+[Incremental ARM deployment](https://learn.microsoft.com/en-us/azure/azure-resource-manager/templates/deployment-modes)
+does not remove a previously created Blob Data Owner assignment when the template
+stops requesting it. Do not claim a redeployment revoked that role.
+Any removal must be separately approved for the exact owned assignment, scope
+and principal, after verifying Contributor access and unrelated/inherited grants.
+This source change performs no live role removal or other permission mutation.
+Prefer a new isolated account for the first approved native validation cell.
+
 ## Explicit operator publication target (issue #23)
 
 All maintained publication entrypoints accept `-SubscriptionId` and `-TenantId`.
