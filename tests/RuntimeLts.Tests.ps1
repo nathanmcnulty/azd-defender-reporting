@@ -26,10 +26,13 @@ Describe 'Wrapper hosted PowerShell LTS runtime' {
             return 'language' -in $keys -and 'version' -in $keys
         }, $true))
         $runtime.Count | Should -Be 1
+        Import-Module (Join-Path $repoRoot 'scripts/AutomationRuntimeContract.psm1') -Force
+        $runtimeContract = Get-AutomationRuntimeContract
         $payload = & ([scriptblock]::Create($runtime[0].Extent.Text))
         $payload.language | Should -Be 'PowerShell'
         $payload.version | Should -Be '7.6'
-        $publisher | Should -Match "\`$runtimeEnvironmentName = 'PowerShell-76-AzAccounts'"
+        $runtimeContract.Spec.runtimeEnvironmentName | Should -Be 'PowerShell-76-AzAccounts'
+        $publisher | Should -Match '\$runtimeEnvironmentName = \$runtimeContract\.Spec\.runtimeEnvironmentName'
         $publisher | Should -Match 'runtimeEnvironment = \$runtimeEnvironmentName'
         $publisher | Should -Not -Match 'PowerShell-74-AzAccounts|version = ''7\.4'''
     }
