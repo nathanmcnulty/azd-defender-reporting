@@ -19,10 +19,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+Import-Module (Join-Path $PSScriptRoot 'AutomationRuntimeContract.psm1') -Force
+$runtimeContract=Get-AutomationRuntimeContract
 
 $runtimeEnvironmentApiVersion = '2024-10-23'
 $automationAccountApiVersion = '2023-11-01'
-$runtimeEnvironmentName = 'PowerShell-76-AzAccounts'
+$runtimeEnvironmentName = $runtimeContract.Spec.runtimeEnvironmentName
 $runbookName = 'Invoke-DashboardPipeline'
 $dailyScheduleName = 'DashboardPipeline-Daily'
 $legacyWeeklyScheduleName = 'DashboardPipeline-Every7Days'
@@ -49,14 +51,17 @@ function Test-IsArmNotFoundError {
 }
 
 function Invoke-ArmApi {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='Json')]
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
         [Parameter(Mandatory = $true)]
         [ValidateSet('GET', 'PUT', 'POST', 'DELETE')]
         [string]$Method,
+        [Parameter(ParameterSetName='Json')]
         [string]$Payload,
+        [Parameter(Mandatory,ParameterSetName='Bytes')]
+        [byte[]]$PayloadBytes,
         [string]$ContentType = 'application/json'
     )
 
@@ -80,6 +85,9 @@ function Invoke-ArmApi {
         $headers['Content-Type'] = $ContentType
     }
 
+    if ($PSBoundParameters.ContainsKey('PayloadBytes')) {
+        return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers -Body $PayloadBytes
+    }
     if ($PSBoundParameters.ContainsKey('Payload')) {
         return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers -Body $Payload
     }
@@ -248,8 +256,8 @@ if (@(Compare-Object -ReferenceObject $requiredParameters -DifferenceObject $act
     throw "Generated runbook parameter contract mismatch. Expected: $($requiredParameters -join ', '). Actual: $($actualParameters -join ', ')."
 }
 
-$runbookFile = Get-Item -LiteralPath $runbookScriptPath
-$runbookSha256 = (Get-FileHash -LiteralPath $runbookScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$runbookBytes = [IO.File]::ReadAllBytes($runbookScriptPath)
+$runbookSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($runbookBytes)).ToLowerInvariant()
 $manifestDirectory = Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\artifacts\automation-runbook'
 New-Item -Path $manifestDirectory -ItemType Directory -Force | Out-Null
 $manifestPath = Join-Path $manifestDirectory 'Invoke-DashboardPipeline.ps1.manifest.json'
@@ -261,9 +269,11 @@ $manifest = [ordered]@{
     commit = $upstreamRepo.Commit
     runbookPath = $runbookScriptPath
     runbookSha256 = $runbookSha256
-    runbookSizeBytes = [int64]$runbookFile.Length
+    runbookSizeBytes = $runbookBytes.LongLength
     sharedHelpersFingerprint = $sharedHelpersFingerprint
     parameters = $actualParameters
+    runtimeContractSha256 = $runtimeContract.Sha256
+    runtimeContract = $runtimeContract.Spec
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 $validatedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 10
@@ -278,7 +288,7 @@ Assert-ObjectFields -InputObject $validatedManifest -FieldNames @(
     'sharedHelpersFingerprint',
     'parameters'
 ) -Description 'Automation runbook manifest'
-if ([string]$validatedManifest.runbookSha256 -ne $runbookSha256 -or [int64]$validatedManifest.runbookSizeBytes -ne [int64]$runbookFile.Length) {
+if ([string]$validatedManifest.runbookSha256 -ne $runbookSha256 -or [int64]$validatedManifest.runbookSizeBytes -ne $runbookBytes.LongLength) {
     throw 'Automation runbook manifest does not match the generated runbook artifact.'
 }
 
@@ -291,6 +301,9 @@ $result = [PSCustomObject]@{
     SharedHelpersFingerprint = $sharedHelpersFingerprint
     RunbookName = $runbookName
     RuntimeEnvironmentName = $runtimeEnvironmentName
+    RuntimeContractSha256 = $runtimeContract.Sha256
+    AzAccountsVersion = $runtimeContract.Spec.package.version
+    AzAccountsPackageSha256 = $runtimeContract.Spec.package.sha256
     DashboardDeliveryMode = $dashboardDeliveryMode
     ManualOnly = [bool]$ManualOnly
 }
@@ -350,8 +363,8 @@ $runtimeEnvironmentPayload = @{
     location = $automationLocation
     properties = @{
         runtime = @{
-            language = 'PowerShell'
-            version = '7.6'
+            language = $runtimeContract.Spec.language
+            version = $runtimeContract.Spec.version
         }
         defaultPackages = @{}
         description = 'PowerShell 7.6 with Az.Accounts only (no full Az module or Az CLI)'
@@ -364,9 +377,7 @@ $packagePath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Mi
 $packagePayload = @{
     location = $automationLocation
     properties = @{
-        contentLink = @{
-            uri = 'https://www.powershellgallery.com/api/v2/package/Az.Accounts'
-        }
+        contentLink = (Get-AutomationPackageContentLink)
     }
 } | ConvertTo-Json -Depth 5
 
@@ -379,8 +390,15 @@ Wait-WithPolling -Description 'Az.Accounts package import' -IntervalSeconds 10 -
     }
 
     $provisioningState = [string]$packageState.properties.provisioningState
-    return ($provisioningState -eq 'Succeeded' -or $provisioningState -eq 'Created')
+    if($provisioningState -in @('Failed','Canceled')){throw 'Locked Az.Accounts import failed.'}
+    if($provisioningState -ne 'Succeeded'){return $false}
+    if($packageState.properties.version -isnot [string] -or $packageState.properties.version -cne $runtimeContract.Spec.package.version){throw 'Imported Az.Accounts version does not match the runtime contract.'}
+    return $true
 }
+
+Assert-AutomationRuntimeReadback -RuntimeId ($runtimeEnvironmentPath -split '\?')[0] `
+    -Runtime (Get-OptionalArmResource -Path $runtimeEnvironmentPath) `
+    -Packages (Get-OptionalArmResource -Path "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runtimeEnvironments/$runtimeEnvironmentName/packages?api-version=$runtimeEnvironmentApiVersion") | Out-Null
 
 $runbookPath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/${runbookName}?api-version=$runtimeEnvironmentApiVersion"
 $runbookPayload = @{
@@ -396,9 +414,8 @@ $runbookPayload = @{
 
 Invoke-ArmApi -Path $runbookPath -Method PUT -Payload $runbookPayload | Out-Null
 
-$runbookContent = Get-Content -LiteralPath $runbookScriptPath -Raw
 $draftContentUri = "https://management.azure.com$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/$runbookName/draft/content?api-version=$runtimeEnvironmentApiVersion"
-Invoke-ArmApi -Path $draftContentUri -Method PUT -Payload $runbookContent -ContentType 'text/powershell' | Out-Null
+Invoke-ArmApi -Path $draftContentUri -Method PUT -PayloadBytes $runbookBytes -ContentType 'text/powershell' | Out-Null
 
 $publishPath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/$runbookName/publish?api-version=$runtimeEnvironmentApiVersion"
 Invoke-ArmApi -Path $publishPath -Method POST -Payload '{}' | Out-Null
