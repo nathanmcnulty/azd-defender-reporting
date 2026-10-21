@@ -222,6 +222,21 @@ AfterAll {
         & "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -SkipTemplatePublish | Out-Null
         $global:pub.PackageReads | Should -Be 2
     }
+    It 'publishes exactly the BOM-bearing runbook bytes bound by the manifest' {
+        $env:COMPUTE_KIND='automation'
+        $result=& "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -SkipTemplatePublish
+        $requests=@($global:pub.Requests | Where-Object {$_.Method -eq 'PUT' -and $_.Uri -match '/runbooks/Invoke-DashboardPipeline/draft/content\?'})
+        $requests.Count | Should -Be 1
+        $body=$requests[0].Body
+        ($body -is [byte[]]) | Should -BeTrue
+        ($body[0..2] -join ',') | Should -BeExactly '239,187,191'
+        $bodyHash=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($body)).ToLowerInvariant()
+        $bodyHash | Should -BeExactly $result.RunbookSha256
+        $manifest=Get-Content -LiteralPath $result.RunbookManifestPath -Raw | ConvertFrom-Json
+        $manifest.runbookSizeBytes | Should -Be $body.LongLength
+        $manifest.runbookSha256 | Should -BeExactly $bodyHash
+        (Get-FileHash -LiteralPath $result.RunbookScriptPath -Algorithm SHA256).Hash.ToLowerInvariant() | Should -BeExactly $bodyHash
+    }
     It 'stops publication on package failure or drift: <_>' -ForEach @('Failed','WrongVersion','ExtraPackage') {
         $global:pub.PackageMode=$_
         $env:COMPUTE_KIND='automation'

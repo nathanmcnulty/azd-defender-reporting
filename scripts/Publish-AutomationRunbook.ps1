@@ -51,14 +51,17 @@ function Test-IsArmNotFoundError {
 }
 
 function Invoke-ArmApi {
-    [CmdletBinding()]
+    [CmdletBinding(DefaultParameterSetName='Json')]
     param(
         [Parameter(Mandatory = $true)]
         [string]$Path,
         [Parameter(Mandatory = $true)]
         [ValidateSet('GET', 'PUT', 'POST', 'DELETE')]
         [string]$Method,
+        [Parameter(ParameterSetName='Json')]
         [string]$Payload,
+        [Parameter(Mandatory,ParameterSetName='Bytes')]
+        [byte[]]$PayloadBytes,
         [string]$ContentType = 'application/json'
     )
 
@@ -82,6 +85,9 @@ function Invoke-ArmApi {
         $headers['Content-Type'] = $ContentType
     }
 
+    if ($PSBoundParameters.ContainsKey('PayloadBytes')) {
+        return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers -Body $PayloadBytes
+    }
     if ($PSBoundParameters.ContainsKey('Payload')) {
         return Invoke-RestMethod -MaximumRedirection 0 -TimeoutSec 120 -Uri $requestUri -Method $Method -Headers $headers -Body $Payload
     }
@@ -250,8 +256,8 @@ if (@(Compare-Object -ReferenceObject $requiredParameters -DifferenceObject $act
     throw "Generated runbook parameter contract mismatch. Expected: $($requiredParameters -join ', '). Actual: $($actualParameters -join ', ')."
 }
 
-$runbookFile = Get-Item -LiteralPath $runbookScriptPath
-$runbookSha256 = (Get-FileHash -LiteralPath $runbookScriptPath -Algorithm SHA256).Hash.ToLowerInvariant()
+$runbookBytes = [IO.File]::ReadAllBytes($runbookScriptPath)
+$runbookSha256 = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($runbookBytes)).ToLowerInvariant()
 $manifestDirectory = Join-Path (Split-Path -Path $PSScriptRoot -Parent) '.local\artifacts\automation-runbook'
 New-Item -Path $manifestDirectory -ItemType Directory -Force | Out-Null
 $manifestPath = Join-Path $manifestDirectory 'Invoke-DashboardPipeline.ps1.manifest.json'
@@ -263,7 +269,7 @@ $manifest = [ordered]@{
     commit = $upstreamRepo.Commit
     runbookPath = $runbookScriptPath
     runbookSha256 = $runbookSha256
-    runbookSizeBytes = [int64]$runbookFile.Length
+    runbookSizeBytes = $runbookBytes.LongLength
     sharedHelpersFingerprint = $sharedHelpersFingerprint
     parameters = $actualParameters
     runtimeContractSha256 = $runtimeContract.Sha256
@@ -282,7 +288,7 @@ Assert-ObjectFields -InputObject $validatedManifest -FieldNames @(
     'sharedHelpersFingerprint',
     'parameters'
 ) -Description 'Automation runbook manifest'
-if ([string]$validatedManifest.runbookSha256 -ne $runbookSha256 -or [int64]$validatedManifest.runbookSizeBytes -ne [int64]$runbookFile.Length) {
+if ([string]$validatedManifest.runbookSha256 -ne $runbookSha256 -or [int64]$validatedManifest.runbookSizeBytes -ne $runbookBytes.LongLength) {
     throw 'Automation runbook manifest does not match the generated runbook artifact.'
 }
 
@@ -408,9 +414,8 @@ $runbookPayload = @{
 
 Invoke-ArmApi -Path $runbookPath -Method PUT -Payload $runbookPayload | Out-Null
 
-$runbookContent = Get-Content -LiteralPath $runbookScriptPath -Raw
 $draftContentUri = "https://management.azure.com$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/$runbookName/draft/content?api-version=$runtimeEnvironmentApiVersion"
-Invoke-ArmApi -Path $draftContentUri -Method PUT -Payload $runbookContent -ContentType 'text/powershell' | Out-Null
+Invoke-ArmApi -Path $draftContentUri -Method PUT -PayloadBytes $runbookBytes -ContentType 'text/powershell' | Out-Null
 
 $publishPath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/$runbookName/publish?api-version=$runtimeEnvironmentApiVersion"
 Invoke-ArmApi -Path $publishPath -Method POST -Payload '{}' | Out-Null

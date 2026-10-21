@@ -8,6 +8,8 @@ change that release, the upstream source lock or its retained older module versi
 
 The maintained Automation publisher includes this contract and its byte digest in
 the generated runbook manifest and BuildOnly result. BuildOnly remains offline.
+The generated runbook is snapshotted as bytes; its manifest hash/size and draft
+upload use that same snapshot, preserving its UTF-8 BOM and exact byte identity.
 Publication sends a versioned URL, content version and SHA-256 contentHash using
 the [package import API](https://learn.microsoft.com/en-us/rest/api/automation/package/create-or-update?view=rest-automation-2024-10-23).
 It waits for Succeeded, rejects Failed/Canceled or a different imported version,
