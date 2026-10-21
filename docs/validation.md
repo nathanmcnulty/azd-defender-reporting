@@ -138,6 +138,59 @@ documentation or by passing offline tests.
 
 ## Automation runtime storage permissions
 
+### Offline synthetic export input gate
+
+Before requesting a live synthetic Automation cell, validate a tiny procedural
+dataset produced by the locked upstream release. The upstream
+`Generate-SyntheticLargeExports.ps1 -IncludeRawRows` creates canonical current and
+history data; `New-SyntheticLegacyVulnSnapshotSet.ps1` materializes dated raw-export
+blobs and `New-SyntheticUploadManifest.ps1 -Mode RawReplay` selects the uploads.
+Use new output directories and preserve the locked archive. The locked legacy
+snapshot helper has a scalar `.Count` failure when exactly one date is selected;
+use two explicit dates and independently calculate the eligible rows on each date.
+Do not rename an uncompressed sample or a canonical current file to imitate a raw
+export. Copy the generated synthetic machine snapshot into the raw-export directory.
+Omit enrichment inputs when qualifying the cell with Advanced Hunting disabled.
+
+Run the wrapper's offline gate with independently established counts:
+
+```powershell
+./scripts/Test-SyntheticExportFixture.ps1 `
+    -DatasetPath <fixture-directory> `
+    -UploadManifestPath <raw-replay-upload-manifest.json> `
+    -ExpectedDeviceCount <device-count> `
+    -ExpectedVulnerabilityRows <total-input-rows-across-dated-files>
+```
+
+This accepts only genuine bounded GZip UTF-8 NDJSON machine/datetime-group export
+inputs. It verifies the upstream manifest's paths, byte sizes and hashes, exact
+input membership, object records, synthetic machine identities and vulnerability
+references, and expected counts. It emits a sorted row-content digest. Retain that
+digest with the reviewed fixture, then pass
+`-ExpectedVulnerabilityContentSha256 <digest>` to detect changed content even when
+someone regenerates the transport manifest. The vulnerability digest is a row
+multiset and does not bind filenames or machine content. For the whole approved
+input set, retain `fixtureSha256` and require `-ExpectedFixtureSha256 <digest>`;
+this binds every selected filename, compressed byte size and SHA256, including
+machine content and date/group distribution. The GZip decoder uses .NET framing
+behavior and does not enforce a canonical single-member/no-trailing-bytes format;
+retain the reviewed per-artifact hashes and whole-fixture identity for approval.
+The only extra local file allowed is
+the upstream `synthetic-legacy-manifest.json`; it is not uploaded by RawReplay.
+
+Input-row counts include repeated observations across dates. They are not an
+expected final dashboard count; use the locked upstream semantic/source projection
+checks to determine report expectations. This gate performs no Azure operations
+and does not qualify job lifecycle, freshness, output correctness or cleanup.
+Before live execution, separately qualify exact-target submission/reconciliation,
+absolute timeout with confirmed stopping, remote control-blob and schedule/input
+preflight, semantic output checks and owned-fixture cleanup. No upload, job,
+permission, publication, deployment or deletion is authorized by passing this gate.
+
+The [synthetic job lifecycle core](automation-job-lifecycle.md) separately
+qualifies single-ID submission/reconciliation and timeout/stop behavior using
+bounded offline adapters. It has no live Azure transport or cleanup implementation.
+
 New Automation deployments assign the runbook's managed identity **Storage Blob
 Data Contributor** on the wrapper storage account, without the redundant Blob
 Data Owner assignment. The locked runbook uses bearer-authenticated Blob

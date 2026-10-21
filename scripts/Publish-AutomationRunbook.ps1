@@ -19,10 +19,12 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
+Import-Module (Join-Path $PSScriptRoot 'AutomationRuntimeContract.psm1') -Force
+$runtimeContract=Get-AutomationRuntimeContract
 
 $runtimeEnvironmentApiVersion = '2024-10-23'
 $automationAccountApiVersion = '2023-11-01'
-$runtimeEnvironmentName = 'PowerShell-76-AzAccounts'
+$runtimeEnvironmentName = $runtimeContract.Spec.runtimeEnvironmentName
 $runbookName = 'Invoke-DashboardPipeline'
 $dailyScheduleName = 'DashboardPipeline-Daily'
 $legacyWeeklyScheduleName = 'DashboardPipeline-Every7Days'
@@ -264,6 +266,8 @@ $manifest = [ordered]@{
     runbookSizeBytes = [int64]$runbookFile.Length
     sharedHelpersFingerprint = $sharedHelpersFingerprint
     parameters = $actualParameters
+    runtimeContractSha256 = $runtimeContract.Sha256
+    runtimeContract = $runtimeContract.Spec
 }
 $manifest | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath $manifestPath -Encoding utf8
 $validatedManifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json -Depth 10
@@ -291,6 +295,9 @@ $result = [PSCustomObject]@{
     SharedHelpersFingerprint = $sharedHelpersFingerprint
     RunbookName = $runbookName
     RuntimeEnvironmentName = $runtimeEnvironmentName
+    RuntimeContractSha256 = $runtimeContract.Sha256
+    AzAccountsVersion = $runtimeContract.Spec.package.version
+    AzAccountsPackageSha256 = $runtimeContract.Spec.package.sha256
     DashboardDeliveryMode = $dashboardDeliveryMode
     ManualOnly = [bool]$ManualOnly
 }
@@ -350,8 +357,8 @@ $runtimeEnvironmentPayload = @{
     location = $automationLocation
     properties = @{
         runtime = @{
-            language = 'PowerShell'
-            version = '7.6'
+            language = $runtimeContract.Spec.language
+            version = $runtimeContract.Spec.version
         }
         defaultPackages = @{}
         description = 'PowerShell 7.6 with Az.Accounts only (no full Az module or Az CLI)'
@@ -364,9 +371,7 @@ $packagePath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Mi
 $packagePayload = @{
     location = $automationLocation
     properties = @{
-        contentLink = @{
-            uri = 'https://www.powershellgallery.com/api/v2/package/Az.Accounts'
-        }
+        contentLink = (Get-AutomationPackageContentLink)
     }
 } | ConvertTo-Json -Depth 5
 
@@ -379,8 +384,15 @@ Wait-WithPolling -Description 'Az.Accounts package import' -IntervalSeconds 10 -
     }
 
     $provisioningState = [string]$packageState.properties.provisioningState
-    return ($provisioningState -eq 'Succeeded' -or $provisioningState -eq 'Created')
+    if($provisioningState -in @('Failed','Canceled')){throw 'Locked Az.Accounts import failed.'}
+    if($provisioningState -ne 'Succeeded'){return $false}
+    if($packageState.properties.version -isnot [string] -or $packageState.properties.version -cne $runtimeContract.Spec.package.version){throw 'Imported Az.Accounts version does not match the runtime contract.'}
+    return $true
 }
+
+Assert-AutomationRuntimeReadback -RuntimeId ($runtimeEnvironmentPath -split '\?')[0] `
+    -Runtime (Get-OptionalArmResource -Path $runtimeEnvironmentPath) `
+    -Packages (Get-OptionalArmResource -Path "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runtimeEnvironments/$runtimeEnvironmentName/packages?api-version=$runtimeEnvironmentApiVersion") | Out-Null
 
 $runbookPath = "$subscriptionPath/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/runbooks/${runbookName}?api-version=$runtimeEnvironmentApiVersion"
 $runbookPayload = @{

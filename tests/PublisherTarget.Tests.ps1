@@ -61,6 +61,21 @@ BeforeAll {
             return @{id="/subscriptions/$($global:pub.ArmSubscription)";subscriptionId=$global:pub.ArmSubscription;tenantId=$global:pub.ArmTenant;state=$state}
         }
         if($Method -ne 'Get'){$global:pub.Writes.Add("HTTP $Method $Uri");return @{}}
+        if($Uri -match '/runtimeEnvironments/PowerShell-76-AzAccounts/packages/Az.Accounts\?'){
+            $global:pub.PackageReads++
+            $state=if($global:pub.PackageMode -eq 'CreatedThenSucceeded' -and $global:pub.PackageReads -eq 1){'Created'}elseif($global:pub.PackageMode -eq 'Failed'){'Failed'}else{'Succeeded'}
+            return @{properties=@{provisioningState=$state;version=$(if($global:pub.PackageMode -eq 'WrongVersion'){'5.3.4'}else{'5.5.0'})}}
+        }
+        if($Uri -match '/runtimeEnvironments/PowerShell-76-AzAccounts/packages\?'){
+            $id=([string]$Uri -split '\?')[0] -replace '^https://management.azure.com',''
+            $value=@(@{id=$id+'/Az.Accounts';name='Az.Accounts';properties=@{version='5.5.0';provisioningState='Succeeded';default=$false}})
+            if($global:pub.PackageMode -eq 'ExtraPackage'){$value+=@{name='unexpected'}}
+            return @{value=$value}
+        }
+        if($Uri -match '/runtimeEnvironments/PowerShell-76-AzAccounts\?'){
+            $id=([string]$Uri -split '\?')[0] -replace '^https://management.azure.com',''
+            return @{id=$id;properties=@{runtime=@{language='PowerShell';version='7.6'};defaultPackages=@{}}}
+        }
         if($Uri -match 'jobSchedules'){return [pscustomobject]@{value=@()}}
         return @{properties=@{provisioningState='Succeeded'}}
     }
@@ -108,6 +123,7 @@ BeforeEach {
     Mock Get-Command -MockWith { if ($Name -eq 'azd') { return $null }; & $global:PublisherRealGetCommand -Name $Name -ErrorAction SilentlyContinue }
     $global:pub = @{Subscription=$subscription;Tenant=$tenant;State='Enabled';Reads=0;DisableAfter=[int]::MaxValue;ReadFailure=$false;Malformed=$false;TokenMismatch=$false;TokenTenantMismatch=$false;GraphMismatch=$false;ArmSubscription=$subscription;ArmTenant=$tenant;ResourceMismatch=$false;ResourceMismatchType='';ScheduleState='Empty';ScheduleReadFailure=$false;Requests=[Collections.Generic.List[object]]::new();Cli=[Collections.Generic.List[string]]::new();Writes=[Collections.Generic.List[string]]::new();TokenRequests=[Collections.Generic.List[string]]::new()}
     $env:COMPUTE_KIND='functionapp';$env:WEB_KIND='none';$env:DASHBOARD_PACKAGE_MODE='auto'
+    $global:pub.PackageMode='';$global:pub.PackageReads=0
     foreach($name in @('computeKindResolved','webKindResolved','dashboardPackageModeResolved')){[Environment]::SetEnvironmentVariable($name,$null)}
 }
 AfterAll {
@@ -187,6 +203,30 @@ AfterAll {
         $payload.properties.frequency | Should -Be 'Day'
         $payload.properties.interval | Should -Be 1
         @($global:pub.Requests | Where-Object {$_.Method -eq 'PUT' -and $_.Uri -match '/jobSchedules/'}).Count | Should -Be 1
+    }
+    It 'uses the locked version/hash in the actual publisher request and records the runtime contract' {
+        $env:COMPUTE_KIND='automation'
+        $result=& "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -SkipTemplatePublish
+        $import=@($global:pub.Requests | Where-Object {$_.Method -eq 'PUT' -and $_.Uri -match '/packages/Az.Accounts\?'})
+        $import.Count | Should -Be 1
+        $link=($import[0].Body | ConvertFrom-Json).properties.contentLink
+        $link.uri | Should -BeExactly 'https://www.powershellgallery.com/api/v2/package/Az.Accounts/5.5.0'
+        $link.contentHash.value | Should -BeExactly '748a0abc2391b80385f25d41d740dc48d098cd2d6365bd70624fa165a4466044'
+        $result.RuntimeContractSha256 | Should -Match '^[a-f0-9]{64}$'
+        $result.AzAccountsVersion | Should -BeExactly '5.5.0'
+    }
+    It 'waits past Created and verifies import before publishing the runbook' {
+        Mock Start-Sleep {}
+        $global:pub.PackageMode='CreatedThenSucceeded'
+        $env:COMPUTE_KIND='automation'
+        & "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -SkipTemplatePublish | Out-Null
+        $global:pub.PackageReads | Should -Be 2
+    }
+    It 'stops publication on package failure or drift: <_>' -ForEach @('Failed','WrongVersion','ExtraPackage') {
+        $global:pub.PackageMode=$_
+        $env:COMPUTE_KIND='automation'
+        {& "$root/scripts/Publish-AutomationRunbook.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly -SkipTemplatePublish | Out-Null} | Should -Throw
+        @($global:pub.Requests | Where-Object {$_.Method -in @('PUT','POST') -and $_.Uri -match '/runbooks/'}).Count | Should -Be 0
     }
     It 'publishes manual-only Automation through <Entry> without changing schedules or starting jobs' -ForEach @(
         @{Entry='Publish-AutomationRunbook'},@{Entry='Publish-Deployment'},@{Entry='Deploy'}
