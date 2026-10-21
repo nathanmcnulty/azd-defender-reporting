@@ -3,7 +3,7 @@ BeforeAll {
     $script:runtimeId='/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/synthetic/providers/Microsoft.Automation/automationAccounts/aa/runtimeEnvironments/PowerShell-76-AzAccounts'
     function New-RuntimeReadback {
         $script:runtime=@{id=$script:runtimeId;properties=@{runtime=@{language='PowerShell';version='7.6'};defaultPackages=@{}}}
-        $script:packages=@{value=@(@{id=$script:runtimeId+'/packages/Az.Accounts';name='Az.Accounts';properties=@{version='5.5.0';provisioningState='Succeeded';default=$false}})}
+        $script:packages=@{value=@(@{id=$script:runtimeId+'/packages/Az.Accounts';name='Az.Accounts';properties=@{version='5.5.0';provisioningState='Succeeded';default=$false;sizeInBytes=9999717}})}
     }
 }
 Describe 'Locked Automation runtime and package metadata' {
@@ -45,7 +45,17 @@ Describe 'Locked Automation runtime and package metadata' {
         $packagesObject=$script:packages | ConvertTo-Json -Depth 10 | ConvertFrom-Json
         Assert-AutomationRuntimeReadback -RuntimeId $script:runtimeId -Runtime $runtimeObject -Packages $packagesObject | Should -BeTrue
     }
-    It 'rejects incomplete or drifted runtime metadata: <_>' -ForEach @('WrongScope','Language','Version','ArrayLanguage','DefaultPackage','ExtraPackage','Paged','NumericNextLink','WrongModule','WrongVersion','Created','Failed','DefaultFlag') {
+    It 'accepts the observed native isDefault spelling without weakening the documented default spelling' {
+        $script:packages.value[0].properties.Remove('default')
+        $script:packages.value[0].properties.isDefault=$false
+        Assert-AutomationRuntimeReadback -RuntimeId $script:runtimeId -Runtime $script:runtime -Packages $script:packages | Should -BeTrue
+        $runtimeObject=$script:runtime | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        $packagesObject=$script:packages | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+        Assert-AutomationRuntimeReadback -RuntimeId $script:runtimeId -Runtime $runtimeObject -Packages $packagesObject | Should -BeTrue
+        $script:packages.value[0].properties.default=$false
+        Assert-AutomationRuntimeReadback -RuntimeId $script:runtimeId -Runtime $script:runtime -Packages $script:packages | Should -BeTrue
+    }
+    It 'rejects incomplete or drifted runtime metadata: <_>' -ForEach @('WrongScope','Language','Version','ArrayLanguage','DefaultPackage','ExtraPackage','Paged','NumericNextLink','WrongModule','WrongVersion','Created','Failed','DefaultFlag','MissingDefault','NativeDefaultTrue','NativeDefaultString','NativeDefaultNull','NativeDefaultArray','NativeDefaultNumber','ConflictingDefault','ConflictingNative','MissingSize','StringSize','WrongSize') {
         switch($_){
             'WrongScope'{$script:runtime.id=$script:runtimeId.Replace('/synthetic/','/foreign/')}
             'Language'{$script:runtime.properties.runtime.language='Python'}
@@ -60,6 +70,17 @@ Describe 'Locked Automation runtime and package metadata' {
             'Created'{$script:packages.value[0].properties.provisioningState='Created'}
             'Failed'{$script:packages.value[0].properties.provisioningState='Failed'}
             'DefaultFlag'{$script:packages.value[0].properties.default='false'}
+            'MissingDefault'{$script:packages.value[0].properties.Remove('default')}
+            'NativeDefaultTrue'{$script:packages.value[0].properties.Remove('default');$script:packages.value[0].properties.isDefault=$true}
+            'NativeDefaultString'{$script:packages.value[0].properties.Remove('default');$script:packages.value[0].properties.isDefault='false'}
+            'NativeDefaultNull'{$script:packages.value[0].properties.Remove('default');$script:packages.value[0].properties.isDefault=$null}
+            'NativeDefaultArray'{$script:packages.value[0].properties.Remove('default');$script:packages.value[0].properties.isDefault=@($false)}
+            'NativeDefaultNumber'{$script:packages.value[0].properties.Remove('default');$script:packages.value[0].properties.isDefault=0}
+            'ConflictingDefault'{$script:packages.value[0].properties.default=$true;$script:packages.value[0].properties.isDefault=$false}
+            'ConflictingNative'{$script:packages.value[0].properties.isDefault=$true}
+            'MissingSize'{$script:packages.value[0].properties.Remove('sizeInBytes')}
+            'StringSize'{$script:packages.value[0].properties.sizeInBytes='9999717'}
+            'WrongSize'{$script:packages.value[0].properties.sizeInBytes=1}
         }
         {Assert-AutomationRuntimeReadback -RuntimeId $script:runtimeId -Runtime $script:runtime -Packages $script:packages} | Should -Throw
     }

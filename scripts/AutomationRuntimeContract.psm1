@@ -73,7 +73,15 @@ function Assert-AutomationRuntimeReadback {
         $package.name -isnot [string] -or $package.name -cne $spec.package.name -or $package.properties -isnot [Collections.IDictionary] -or
         $package.properties.version -isnot [string] -or $package.properties.version -cne $spec.package.version -or
         $package.properties.provisioningState -isnot [string] -or $package.properties.provisioningState -cne 'Succeeded' -or
-        $package.properties.default -isnot [bool] -or $package.properties.default){throw 'Runtime package identity/import is not qualified.'}
+        ($package.properties.sizeInBytes -isnot [long] -and $package.properties.sizeInBytes -isnot [int]) -or
+        $package.properties.sizeInBytes -ne $spec.package.sizeBytes){throw 'Runtime package identity/import is not qualified.'}
+    # Published REST schema uses default; native 2024-10-23 responses also use
+    # isDefault. Require an explicit false boolean for every supplied spelling.
+    $defaultFlags=@('default','isDefault' | Where-Object {$package.properties.Contains($_)})
+    if($defaultFlags.Count -eq 0){throw 'Runtime package default status is missing.'}
+    foreach($flag in $defaultFlags){
+        if($package.properties[$flag] -isnot [bool] -or $package.properties[$flag]){throw 'Runtime package default status is not qualified.'}
+    }
     return $true
 }
 Export-ModuleMember -Function Get-AutomationRuntimeContract,Get-AutomationPackageContentLink,Assert-AutomationRuntimeReadback

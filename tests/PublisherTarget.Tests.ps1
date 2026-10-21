@@ -68,7 +68,7 @@ BeforeAll {
         }
         if($Uri -match '/runtimeEnvironments/PowerShell-76-AzAccounts/packages\?'){
             $id=([string]$Uri -split '\?')[0] -replace '^https://management.azure.com',''
-            $value=@(@{id=$id+'/Az.Accounts';name='Az.Accounts';properties=@{version='5.5.0';provisioningState='Succeeded';default=$false}})
+            $value=@(@{id=$id+'/Az.Accounts';name='Az.Accounts';properties=@{version='5.5.0';provisioningState='Succeeded';default=$false;sizeInBytes=9999717}})
             if($global:pub.PackageMode -eq 'ExtraPackage'){$value+=@{name='unexpected'}}
             return @{value=$value}
         }

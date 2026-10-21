@@ -67,7 +67,7 @@ namespace AzdValidationTests {
                     }
                     elseif($path -like '*/runbooks/Invoke-DashboardPipeline'){@{id=$path;properties=@{state=$(if($script:fault -eq 'Draft'){'New'}else{'Published'});runbookType='PowerShell';runtimeEnvironment=$(if($script:fault -eq 'RuntimeBinding'){'foreign-runtime'}else{'PowerShell-76-AzAccounts'})}}}
                     elseif($path -like '*/runtimeEnvironments/PowerShell-76-AzAccounts'){@{id=$path;properties=@{runtime=@{language='PowerShell';version=$(if($script:fault -eq 'RuntimeVersion'){'7.4'}else{'7.6'})};defaultPackages=@{}}}}
-                    elseif($path -like '*/runtimeEnvironments/PowerShell-76-AzAccounts/packages'){@{value=@(@{id=$path+'/Az.Accounts';name='Az.Accounts';properties=@{default=$false;provisioningState='Succeeded';version=$(if($script:fault -eq 'PackageVersion'){'5.3.4'}else{'5.5.0'})}})}}
+                    elseif($path -like '*/runtimeEnvironments/PowerShell-76-AzAccounts/packages'){@{value=@(@{id=$path+'/Az.Accounts';name='Az.Accounts';properties=@{default=$false;sizeInBytes=9999717;provisioningState='Succeeded';version=$(if($script:fault -eq 'PackageVersion'){'5.3.4'}else{'5.5.0'})}})}}
                     elseif($path -like '*/content'){
                         $bytes=[Text.Encoding]::UTF8.GetBytes($(if($script:fault -eq 'RunbookHash'){'changed'}else{'param()'}))
                         return @{StatusCode=200;Bytes=$bytes}
