@@ -23,6 +23,7 @@ param(
 )
 Set-StrictMode -Version Latest
 $ErrorActionPreference='Stop'
+Import-Module (Join-Path $PSScriptRoot 'AutomationJobParameters.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AutomationValidationAdapter.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AutomationValidationPreflight.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'AutomationJobLifecycle.psm1') -Force
@@ -32,6 +33,7 @@ $text=Get-Content -LiteralPath $file.FullName -Raw
 [AzdValidation.BoundedIO]::ValidateJsonObject($text)
 $context=$text | ConvertFrom-Json -AsHashtable -NoEnumerate -Depth 32
 Assert-ValidationContext $context | Out-Null
+$encoding=if($context.Contains('ParameterEncoding')){$context.ParameterEncoding}else{'LegacyRaw'}
 $jobId="/subscriptions/$($context.SubscriptionId)/resourceGroups/$($context.ResourceGroupName)/providers/Microsoft.Automation/automationAccounts/$($context.AutomationAccountName)/jobs/$($context.JobId)"
 if(-not $Execute) {
     return [pscustomobject]@{
@@ -39,6 +41,7 @@ if(-not $Execute) {
         jobResourceId=$jobId;runbook=$context.RunbookName;storageAccount=$context.StorageAccountName
         runbookSha256=$context.RunbookSha256;fixtureSha256=$context.FixtureSha256
         runtimeContractSha256=$context.RuntimeContractSha256
+        parameterEncoding=$encoding;logicalParameterTypes=(AutomationJobParameters\Get-ValidationParameterTypes)
         selectedInputCount=$context.Artifacts.Count;selectedTemplateCount=$context.Templates.Count
         receiptPath=[IO.Path]::GetFullPath($ReceiptPath);reconcileOnly=[bool]$ReconcileOnly
         executionTimeoutSeconds=$TimeoutSeconds;stopTimeoutSeconds=$StopTimeoutSeconds
@@ -48,6 +51,7 @@ if(-not $Execute) {
         remaining='Requires explicit action approval; provisioned isolated cell, reviewed fixture/template/runbook identity, report acceptance and owned cleanup remain separate.'
     }
 }
+if($encoding -ceq 'LegacyRaw' -and -not $ReconcileOnly){throw 'Legacy contexts permit reconciliation only; new jobs require an explicitly reviewed JsonValues context.'}
 $adapter=New-AutomationValidationAdapter -Context $context -RequestTimeoutSeconds $RequestTimeoutSeconds
 $arguments=@{
     TenantId=$context.TenantId;SubscriptionId=$context.SubscriptionId;ResourceGroupName=$context.ResourceGroupName
@@ -56,6 +60,7 @@ $arguments=@{
     ReceiptPath=$ReceiptPath;TimeoutSeconds=$TimeoutSeconds;StopTimeoutSeconds=$StopTimeoutSeconds
     RequestTimeoutSeconds=$RequestTimeoutSeconds;PollSeconds=$PollSeconds;MaxReadErrors=$MaxReadErrors
     PreflightTimeoutSeconds=$PreflightTimeoutSeconds
+    ParameterEncoding=$encoding
     Request=$adapter.Request;Guard=$adapter.Guard;Preflight=$adapter.Preflight;ReconcileOnly=$ReconcileOnly
 }
 Invoke-ValidationJobLifecycle @arguments

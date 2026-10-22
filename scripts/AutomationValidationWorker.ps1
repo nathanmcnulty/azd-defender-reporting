@@ -5,6 +5,7 @@ $ErrorActionPreference='Stop'
 $WarningPreference='SilentlyContinue'
 $ProgressPreference='SilentlyContinue'
 try {
+    Import-Module (Join-Path $PSScriptRoot 'AutomationJobParameters.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot 'AutomationValidationAdapter.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot 'AutomationValidationPreflight.psm1') -Force
     . (Join-Path $PSScriptRoot 'Common-AzurePublish.ps1')
@@ -40,7 +41,8 @@ try {
             if(-not (($message.method -cin @('GET','PUT') -and $message.uri -ceq $jobUri) -or ($message.method -ceq 'POST' -and $message.uri -ceq $stopUri))){throw 'Request outside exact job allowlist.'}
             $bodyText=$null
             if($message.method -ceq 'PUT') {
-                $expected=[ordered]@{properties=[ordered]@{runbook=[ordered]@{name=$context.RunbookName};parameters=[ordered]@{StorageAccountName=$context.StorageAccountName;UseExistingExportsOnly='true';IncludeAdvancedHunting='false';UseDirectMergeDeviceLookup='false';DashboardDeliveryMode='SelfContained';Export='BlobStorage'}}}
+                $parameters=AutomationJobParameters\Get-ValidationJobParameters -StorageAccountName $context.StorageAccountName -ParameterEncoding $context.ParameterEncoding
+                $expected=[ordered]@{properties=[ordered]@{runbook=[ordered]@{name=$context.RunbookName};parameters=$parameters}}
                 # Context and the lifecycle's ordered payload use the same fixed shape.
                 $bodyText=$expected | ConvertTo-Json -Depth 10 -Compress
             } elseif($null -ne $message.body){throw 'Unexpected request body.'}

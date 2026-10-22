@@ -1,4 +1,5 @@
 BeforeAll {
+    Import-Module (Join-Path $PSScriptRoot '../scripts/AutomationJobParameters.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../scripts/AutomationValidationAdapter.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../scripts/AutomationValidationPreflight.psm1') -Force
     Import-Module (Join-Path $PSScriptRoot '../scripts/AutomationRuntimeContract.psm1') -Force
@@ -34,7 +35,9 @@ namespace AzdValidationTests {
         $script:context=@{TenantId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';SubscriptionId='bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';ResourceGroupName='rg-synthetic';AutomationAccountName='aa-synthetic';RunbookName='Invoke-DashboardPipeline';StorageAccountName='syntheticstore';JobId='11111111-2222-4333-8444-555555555555';AutomationPrincipalId='22222222-2222-4222-8222-222222222222';ExpectedUserName='operator@synthetic.invalid';RunbookSha256=(Get-TestHash ([Text.Encoding]::UTF8.GetBytes('param()')));FixtureSha256=(Get-TestHash ([Text.Encoding]::UTF8.GetBytes($identity)));Artifacts=$artifacts;Templates=@((New-TestArtifact 'dashboard.html' '<html>synthetic</html>'))}
         $script:jobUri="https://management.azure.com/subscriptions/$($script:context.SubscriptionId)/resourceGroups/rg-synthetic/providers/Microsoft.Automation/automationAccounts/aa-synthetic/jobs/$($script:context.JobId)?api-version=2024-10-23"
         $script:context.RuntimeContractSha256=(AutomationRuntimeContract\Get-AutomationRuntimeContract).Sha256
+        $script:context.ParameterEncoding='JsonValues'
         $script:payload=@{properties=@{runbook=@{name='Invoke-DashboardPipeline'};parameters=@{StorageAccountName='syntheticstore';UseExistingExportsOnly='true';IncludeAdvancedHunting='false';UseDirectMergeDeviceLookup='false';DashboardDeliveryMode='SelfContained';Export='BlobStorage'}}}
+        $script:payload.properties.parameters=AutomationJobParameters\Get-ValidationJobParameters -StorageAccountName 'syntheticstore' -ParameterEncoding JsonValues
         $script:fault=''
         $script:reads=[Collections.Generic.List[object]]::new()
     }
@@ -65,7 +68,22 @@ namespace AzdValidationTests {
                         if($script:fault -eq 'WhitespaceLink'){$listing.nextLink=' '}
                         $listing
                     }
-                    elseif($path -like '*/runbooks/Invoke-DashboardPipeline'){@{id=$path;properties=@{state=$(if($script:fault -eq 'Draft'){'New'}else{'Published'});runbookType='PowerShell';runtimeEnvironment=$(if($script:fault -eq 'RuntimeBinding'){'foreign-runtime'}else{'PowerShell-76-AzAccounts'})}}}
+                    elseif($path -like '*/runbooks/Invoke-DashboardPipeline'){
+                        $metadata=[Collections.Generic.Dictionary[string,object]]::new([StringComparer]::Ordinal)
+                        $types=AutomationJobParameters\Get-ValidationParameterTypes
+                        foreach($key in $types.Keys){$metadata[$key]=@{type=$types[$key];isMandatory=$false}}
+                        switch($script:fault){
+                            'ParameterMissing'{[void]$metadata.Remove('StorageAccountName')}
+                            'ParameterWrongType'{$metadata.UseExistingExportsOnly.type='System.String'}
+                            'ParameterMandatoryString'{$metadata.Export.isMandatory='false'}
+                            'ParameterExtraRequired'{$metadata.Other=@{type='System.String';isMandatory=$true}}
+                            'ParameterExtraOptional'{$metadata.Other=@{type='System.String';isMandatory=$false}}
+                            'ParameterMetadataMissing'{$metadata=$null}
+                            'ParameterUppercase'{$metadata['STORAGEACCOUNTNAME']=$metadata.StorageAccountName;[void]$metadata.Remove('StorageAccountName');$metadata.STORAGEACCOUNTNAME.isMandatory=$true}
+                            'ParameterDuplicate'{$metadata['STORAGEACCOUNTNAME']=$metadata.StorageAccountName}
+                        }
+                        @{id=$path;properties=@{parameters=$metadata;state=$(if($script:fault -eq 'Draft'){'New'}else{'Published'});runbookType='PowerShell';runtimeEnvironment=$(if($script:fault -eq 'RuntimeBinding'){'foreign-runtime'}else{'PowerShell-76-AzAccounts'})}}
+                    }
                     elseif($path -like '*/runtimeEnvironments/PowerShell-76-AzAccounts'){@{id=$path;properties=@{runtime=@{language='PowerShell';version=$(if($script:fault -eq 'RuntimeVersion'){'7.4'}else{'7.6'})};defaultPackages=@{}}}}
                     elseif($path -like '*/runtimeEnvironments/PowerShell-76-AzAccounts/packages'){@{value=@(@{id=$path+'/Az.Accounts';name='Az.Accounts';properties=@{default=$false;sizeInBytes=9999717;provisioningState='Succeeded';version=$(if($script:fault -eq 'PackageVersion'){'5.3.4'}else{'5.5.0'})}})}}
                     elseif($path -like '*/content'){
@@ -160,6 +178,42 @@ Describe 'Exact remote synthetic preflight and request policy' {
         {Invoke-TestPreflight} | Should -Throw '*Runtime contract binding*'
         $script:reads.Count | Should -Be 0
     }
+    It 'rejects unsafe published parameter metadata: <_>' -ForEach @('ParameterMissing','ParameterWrongType','ParameterMandatoryString','ParameterExtraRequired','ParameterMetadataMissing') {
+        $script:fault=$_
+        {Invoke-TestPreflight}|Should -Throw '*parameter*'
+        @($script:reads|Where-Object method -NotIn 'GET','HEAD').Count|Should -Be 0
+    }
+    It 'allows additional optional production parameters' {
+        $script:fault='ParameterExtraOptional'
+        Invoke-TestPreflight|Should -BeTrue
+    }
+    It 'matches metadata names case-insensitively while rejecting duplicate aliases' {
+        $script:fault='ParameterUppercase'
+        Invoke-TestPreflight|Should -BeTrue
+        $script:fault='ParameterDuplicate'
+        {Invoke-TestPreflight}|Should -Throw '*parameter name*'
+    }
+    It 'rejects altered wire values: <Case>' -ForEach @(
+        @{Case='unquoted string';Key='StorageAccountName';Value='syntheticstore'},
+        @{Case='quoted boolean';Key='UseExistingExportsOnly';Value='"true"'},
+        @{Case='native boolean';Key='UseExistingExportsOnly';Value=$true},
+        @{Case='double encoding';Key='Export';Value='"\"BlobStorage\""'}
+    ) {
+        $script:payload.properties.parameters[$Key]=$Value
+        {Assert-ValidationJobRequest $script:context 'PUT' $script:jobUri $script:payload}|Should -Throw '*parameter*'
+    }
+    It 'permits legacy read and stop but rejects submission before worker launch' {
+        $script:context.Remove('ParameterEncoding')
+        Assert-ValidationJobRequest $script:context 'GET' $script:jobUri $null|Should -BeTrue
+        Assert-ValidationJobRequest $script:context 'POST' ($script:jobUri -replace '\?','/stop?') $null|Should -BeTrue
+        $adapter=New-AutomationValidationAdapter $script:context
+        {& $adapter.Request 'PUT' $script:jobUri $script:payload 1}|Should -Throw '*reconciliation only*'
+    }
+    It 'rejects invalid encoding context without any reads' -ForEach @($null,'jsonvalues','LegacyRaw',1) {
+        $script:context.ParameterEncoding=$_
+        {Assert-ValidationContext $script:context}|Should -Throw '*encoding*'
+        $script:reads.Count|Should -Be 0
+    }
     It 'supports the locked release nested dashboard template modules without allowing traversal' {
         $script:context.Templates=@((New-TestArtifact 'dashboard/00-core.js' 'module'))
         $script:content['dashboard/00-core.js']='module'
@@ -250,6 +304,7 @@ if($message.method -eq 'PUT'){
         foreach($key in @('TenantId','SubscriptionId','ResourceGroupName','AutomationAccountName','RunbookName','StorageAccountName','JobId','FixtureSha256','RunbookSha256')){$arguments[$key]=$context[$key]}
         $arguments.ReceiptPath=Join-Path $TestDrive 'roundtrip-receipt.json'
         $arguments.TimeoutSeconds=30;$arguments.StopTimeoutSeconds=10;$arguments.PollSeconds=1
+        $arguments.ParameterEncoding='JsonValues'
         $arguments.Guard={param($budget) $true};$arguments.Preflight={param($budget) $true};$arguments.Request=$request
         $result=Invoke-ValidationJobLifecycle @arguments
         $result.outcome | Should -Be 'execution-completed'
