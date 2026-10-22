@@ -33,7 +33,7 @@ namespace AzdValidation {
             process.StandardInput.Close();
         }
         public static async Task<string> Run(string pwsh, string script, string input, int seconds) {
-            if (input.Length > 131072 || seconds < 1 || seconds > 30) throw new InvalidDataException("Invalid worker bound.");
+            if (input.Length > 131072 || seconds < 1 || seconds > 300) throw new InvalidDataException("Invalid worker bound.");
             var start = new ProcessStartInfo(pwsh) {
                 UseShellExecute = false, CreateNoWindow = true,
                 RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,

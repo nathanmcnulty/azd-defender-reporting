@@ -16,6 +16,8 @@ param(
     [ValidateRange(1,3600)][int]$TimeoutSeconds=600,
     [ValidateRange(1,600)][int]$StopTimeoutSeconds=120,
     [ValidateRange(1,30)][int]$RequestTimeoutSeconds=20,
+    # Use zero only to reconcile a legacy receipt without a separate preflight policy.
+    [ValidateRange(0,300)][int]$PreflightTimeoutSeconds=120,
     [ValidateRange(1,30)][int]$PollSeconds=5,
     [ValidateRange(1,10)][int]$MaxReadErrors=3
 )
@@ -40,18 +42,20 @@ if(-not $Execute) {
         selectedInputCount=$context.Artifacts.Count;selectedTemplateCount=$context.Templates.Count
         receiptPath=[IO.Path]::GetFullPath($ReceiptPath);reconcileOnly=[bool]$ReconcileOnly
         executionTimeoutSeconds=$TimeoutSeconds;stopTimeoutSeconds=$StopTimeoutSeconds
+        preflightTimeoutSeconds=$PreflightTimeoutSeconds;requestTimeoutSeconds=$RequestTimeoutSeconds
         permittedProtocol=$(if($ReconcileOnly){'same-job GET; bounded POST stop if unresolved'}else{'GET preflight; at most one exact-job PUT; same-job GET and bounded POST stop'})
         providerAccessPerformed=$false;cleanupAllowed=$false
         remaining='Requires explicit action approval; provisioned isolated cell, reviewed fixture/template/runbook identity, report acceptance and owned cleanup remain separate.'
     }
 }
-$adapter=New-AutomationValidationAdapter $context
+$adapter=New-AutomationValidationAdapter -Context $context -RequestTimeoutSeconds $RequestTimeoutSeconds
 $arguments=@{
     TenantId=$context.TenantId;SubscriptionId=$context.SubscriptionId;ResourceGroupName=$context.ResourceGroupName
     AutomationAccountName=$context.AutomationAccountName;RunbookName=$context.RunbookName;StorageAccountName=$context.StorageAccountName
     JobId=$context.JobId;FixtureSha256=$context.FixtureSha256;RunbookSha256=$context.RunbookSha256
     ReceiptPath=$ReceiptPath;TimeoutSeconds=$TimeoutSeconds;StopTimeoutSeconds=$StopTimeoutSeconds
     RequestTimeoutSeconds=$RequestTimeoutSeconds;PollSeconds=$PollSeconds;MaxReadErrors=$MaxReadErrors
+    PreflightTimeoutSeconds=$PreflightTimeoutSeconds
     Request=$adapter.Request;Guard=$adapter.Guard;Preflight=$adapter.Preflight;ReconcileOnly=$ReconcileOnly
 }
 Invoke-ValidationJobLifecycle @arguments

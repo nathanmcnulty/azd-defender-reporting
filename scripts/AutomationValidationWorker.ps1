@@ -14,8 +14,15 @@ try {
     $message=$text | ConvertFrom-Json -AsHashtable -NoEnumerate -Depth 32
     $context=$message.context
     Assert-ValidationContext $context | Out-Null
-    if(($message.budget -isnot [int] -and $message.budget -isnot [long]) -or $message.budget -lt 1 -or $message.budget -gt 30 -or $message.action -cnotin @('Guard','Preflight','Request')){throw 'Invalid action.'}
+    $callbackLimit=if($message.action -ceq 'Preflight'){300}else{30}
+    if(($message.budget -isnot [int] -and $message.budget -isnot [long]) -or $message.budget -lt 1 -or $message.budget -gt $callbackLimit -or $message.action -cnotin @('Guard','Preflight','Request')){throw 'Invalid action.'}
     $message.budget=[int]$message.budget
+    $requestBudget=$message.budget
+    if($message.action -ceq 'Preflight') {
+        if(-not $message.Contains('requestBudget') -or ($message.requestBudget -isnot [int] -and $message.requestBudget -isnot [long]) -or $message.requestBudget -lt 1 -or $message.requestBudget -gt 30){throw 'Invalid HTTP request budget.'}
+        $requestBudget=[int]$message.requestBudget
+    }
+    $callbackWatch=[Diagnostics.Stopwatch]::StartNew()
     if($message.action -ceq 'Request'){Assert-ValidationJobRequest -Context $context -Method $message.method -Uri $message.uri -Body $message.body | Out-Null}
     Initialize-PublishTarget -SubscriptionId $context.SubscriptionId -TenantId $context.TenantId
     $operator=Get-AzCliJson -Arguments @('account','show','--output','json')
@@ -55,7 +62,10 @@ try {
                 $token=if($audience -ceq 'ARM' -and $parsed.Host -ceq 'management.azure.com' -and $parsed.AbsolutePath.StartsWith($groupId+'/',[StringComparison]::OrdinalIgnoreCase)){$armToken}
                     elseif($audience -ceq 'Storage' -and $parsed.Host -ceq "$($context.StorageAccountName).blob.core.windows.net"){$storageToken}
                     else{throw 'Preflight token destination mismatch.'}
-                $http=[AzdValidation.BoundedIO]::Send($method,$parsed,$token,$null,$message.budget).GetAwaiter().GetResult()
+                $remaining=$message.budget-$callbackWatch.Elapsed.TotalSeconds
+                if($remaining -le 0){throw 'Preflight deadline elapsed.'}
+                $readBudget=[int][math]::Max(1,[math]::Min($requestBudget,[math]::Ceiling($remaining)))
+                $http=[AzdValidation.BoundedIO]::Send($method,$parsed,$token,$null,$readBudget).GetAwaiter().GetResult()
                 if($audience -ceq 'ARM' -and $http.StatusCode -eq 200 -and $parsed.AbsolutePath -notlike '*/content'){
                     [AzdValidation.BoundedIO]::ValidateJsonObject([Text.UTF8Encoding]::new($false,$true).GetString($http.Bytes))
                 }

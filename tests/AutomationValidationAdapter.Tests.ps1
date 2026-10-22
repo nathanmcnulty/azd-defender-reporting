@@ -339,4 +339,71 @@ Start-Sleep -Seconds 30
             Test-Path -LiteralPath $tripwireMarker | Should -BeFalse
         } finally {$env:PATH=$oldAdapterPath}
     }
+    It 'keeps Guard and Request worker budgets at or below 30 seconds' -ForEach @('Guard','Request') {
+        New-AdapterFixture
+        $tripwireDirectory=Join-Path $TestDrive ('over-budget-cli-'+[guid]::NewGuid().ToString('N'))
+        New-Item -ItemType Directory -Path $tripwireDirectory -Force | Out-Null
+        $tripwireMarker=Join-Path $tripwireDirectory 'called.txt'
+        Set-Content -LiteralPath (Join-Path $tripwireDirectory 'az.cmd') -Value "@echo off`necho called > `"$tripwireMarker`"`nexit /b 1"
+        $oldAdapterPath=$env:PATH
+        try {
+            $env:PATH=$tripwireDirectory+';'+$env:PATH
+            $actualWorker=Join-Path $PSScriptRoot '../scripts/AutomationValidationWorker.ps1'
+            $action=$_
+            $message=@{action=$action;context=$script:context;budget=31}
+            if($action -eq 'Request'){$message.method='GET';$message.uri=$script:jobUri;$message.body=$null}
+            {Invoke-BoundedValidationChild -ScriptPath $actualWorker -Message $message -TimeoutSeconds 35} | Should -Throw '*worker failed*'
+            Test-Path -LiteralPath $tripwireMarker | Should -BeFalse
+        } finally {$env:PATH=$oldAdapterPath}
+    }
+    It 'accepts a preflight callback budget above 30 only with a request budget at or below 30' {
+        New-AdapterFixture
+        $tripwireDirectory=Join-Path $TestDrive 'preflight-long-budget-cli'
+        New-Item -ItemType Directory -Path $tripwireDirectory -Force | Out-Null
+        $tripwireMarker=Join-Path $tripwireDirectory 'called.txt'
+        Set-Content -LiteralPath (Join-Path $tripwireDirectory 'az.cmd') -Value "@echo off`necho called > `"$tripwireMarker`"`nexit /b 1"
+        $oldAdapterPath=$env:PATH
+        try {
+            $env:PATH=$tripwireDirectory+';'+$env:PATH
+            $actualWorker=Join-Path $PSScriptRoot '../scripts/AutomationValidationWorker.ps1'
+            {Invoke-BoundedValidationChild -ScriptPath $actualWorker -Message @{action='Preflight';context=$script:context;budget=31;requestBudget=30} -TimeoutSeconds 35} | Should -Throw '*worker failed*'
+            Test-Path -LiteralPath $tripwireMarker | Should -BeTrue
+        } finally {$env:PATH=$oldAdapterPath}
+    }
+    It 'rejects preflight request budgets outside 1 through 30 before CLI access' -ForEach @(0,31) {
+        New-AdapterFixture
+        $tripwireDirectory=Join-Path $TestDrive ('invalid-preflight-request-budget-'+$_)
+        New-Item -ItemType Directory -Path $tripwireDirectory -Force | Out-Null
+        $tripwireMarker=Join-Path $tripwireDirectory 'called.txt'
+        Set-Content -LiteralPath (Join-Path $tripwireDirectory 'az.cmd') -Value "@echo off`necho called > `"$tripwireMarker`"`nexit /b 1"
+        $oldAdapterPath=$env:PATH
+        try {
+            $env:PATH=$tripwireDirectory+';'+$env:PATH
+            $actualWorker=Join-Path $PSScriptRoot '../scripts/AutomationValidationWorker.ps1'
+            $requestBudget=$_
+            {Invoke-BoundedValidationChild -ScriptPath $actualWorker -Message @{action='Preflight';context=$script:context;budget=31;requestBudget=$requestBudget} -TimeoutSeconds 35} | Should -Throw '*worker failed*'
+            Test-Path -LiteralPath $tripwireMarker | Should -BeFalse
+        } finally {$env:PATH=$oldAdapterPath}
+    }
+    It 'rejects an extended preflight budget when its per-request budget is missing' {
+        New-AdapterFixture
+        $tripwireDirectory=Join-Path $TestDrive 'missing-preflight-request-budget-cli'
+        New-Item -ItemType Directory -Path $tripwireDirectory -Force | Out-Null
+        $tripwireMarker=Join-Path $tripwireDirectory 'called.txt'
+        Set-Content -LiteralPath (Join-Path $tripwireDirectory 'az.cmd') -Value "@echo off`necho called > `"$tripwireMarker`"`nexit /b 1"
+        $oldAdapterPath=$env:PATH
+        try {
+            $env:PATH=$tripwireDirectory+';'+$env:PATH
+            $actualWorker=Join-Path $PSScriptRoot '../scripts/AutomationValidationWorker.ps1'
+            {Invoke-BoundedValidationChild -ScriptPath $actualWorker -Message @{action='Preflight';context=$script:context;budget=31} -TimeoutSeconds 35} | Should -Throw '*worker failed*'
+            Test-Path -LiteralPath $tripwireMarker | Should -BeFalse
+        } finally {$env:PATH=$oldAdapterPath}
+    }
+    It 'allows a real supervised offline child to run for 31 seconds within its 35-second callback bound' {
+        Set-Content -LiteralPath $script:worker -Value "Start-Sleep -Seconds 31`n[Console]::Out.Write('{`"ok`":true,`"result`":true}')"
+        $watch=[Diagnostics.Stopwatch]::StartNew()
+        Invoke-BoundedValidationChild -ScriptPath $script:worker -Message @{action='offline-test'} -TimeoutSeconds 35 | Should -BeTrue
+        $watch.Elapsed.TotalSeconds | Should -BeGreaterOrEqual 31
+        $watch.Elapsed.TotalSeconds | Should -BeLessThan 35
+    }
 }

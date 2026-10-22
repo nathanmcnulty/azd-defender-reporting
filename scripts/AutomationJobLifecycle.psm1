@@ -36,6 +36,8 @@ function Invoke-ValidationJobLifecycle {
         [ValidateRange(1, 3600)][int]$TimeoutSeconds = 600,
         [ValidateRange(1, 600)][int]$StopTimeoutSeconds = 120,
         [ValidateRange(1, 30)][int]$RequestTimeoutSeconds = 20,
+        # Zero preserves the legacy callback budget and receipt binding.
+        [ValidateRange(0, 300)][int]$PreflightTimeoutSeconds = 0,
         [ValidateRange(1, 30)][int]$PollSeconds = 5,
         [ValidateRange(1, 10)][int]$MaxReadErrors = 3,
         [switch]$ReconcileOnly,
@@ -57,10 +59,10 @@ function Invoke-ValidationJobLifecycle {
         $timeState.Last = [double]$value
         return [double]$value
     }
-    function Get-Budget([double]$Deadline) {
+    function Get-Budget([double]$Deadline, [int]$Limit = $requestLimit) {
         $remaining = $Deadline - (Get-Time)
         if ($remaining -le 0) { throw [TimeoutException]::new('Operation deadline elapsed.') }
-        return [int][math]::Max(1, [math]::Min($requestLimit, [math]::Ceiling($remaining)))
+        return [int][math]::Max(1, [math]::Min($Limit, [math]::Ceiling($remaining)))
     }
     $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/jobs/$JobId"
     $uri = "https://management.azure.com${resourceId}?api-version=2024-10-23"
@@ -68,6 +70,8 @@ function Invoke-ValidationJobLifecycle {
     $parameters = [ordered]@{StorageAccountName=$StorageAccountName;UseExistingExportsOnly='true';IncludeAdvancedHunting='false';UseDirectMergeDeviceLookup='false';DashboardDeliveryMode='SelfContained';Export='BlobStorage'}
     $payload = [ordered]@{properties=[ordered]@{runbook=[ordered]@{name=$RunbookName};parameters=$parameters}}
     $policy = [ordered]@{executionTimeoutSeconds=$TimeoutSeconds;stopTimeoutSeconds=$StopTimeoutSeconds;requestTimeoutSeconds=$RequestTimeoutSeconds;pollSeconds=$PollSeconds;maxReadErrors=$MaxReadErrors}
+    if ($PreflightTimeoutSeconds -gt 0) { $policy.preflightTimeoutSeconds = $PreflightTimeoutSeconds }
+    $preflightLimit = if ($PreflightTimeoutSeconds -gt 0) { $PreflightTimeoutSeconds } else { $requestLimit }
     $binding = [ordered]@{tenantId=$TenantId.ToString();subscriptionId=$SubscriptionId.ToString();jobResourceId=$resourceId;runbook=$RunbookName;storage=$StorageAccountName;fixtureSha256=$FixtureSha256;runbookSha256=$RunbookSha256;payload=$payload;policy=$policy}
     $bindingText = $binding | ConvertTo-Json -Depth 10 -Compress
     $bindingHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($bindingText))).ToLowerInvariant()
@@ -116,9 +120,10 @@ function Invoke-ValidationJobLifecycle {
                 if ($Required) { throw 'Required receipt update failed; no submission permitted.' }
             }
         }
-        function Confirm-Check([scriptblock]$Check, [double]$Deadline) {
-            $checked = & $Check (Get-Budget $Deadline)
+        function Confirm-Check([scriptblock]$Check, [double]$Deadline, [int]$Limit = $requestLimit) {
+            $checked = & $Check (Get-Budget $Deadline $Limit)
             if ($checked -isnot [bool] -or -not $checked) { throw 'Required guard/preflight did not explicitly pass.' }
+            if ((Get-Time) -ge $Deadline) { throw [TimeoutException]::new('Operation deadline elapsed during check.') }
         }
         function Read-Job([double]$Deadline) {
             $response = & $Request 'GET' $uri $null (Get-Budget $Deadline)
@@ -151,10 +156,10 @@ function Invoke-ValidationJobLifecycle {
         try {
             Confirm-Check $Guard $deadline
             if (-not $ReconcileOnly) {
-                Confirm-Check $Preflight $deadline
+                Confirm-Check $Preflight $deadline $preflightLimit
                 $existing = & $Request 'GET' $uri $null (Get-Budget $deadline)
                 if ($null -eq $existing -or $existing.StatusCode -isnot [int] -or $existing.StatusCode -ne 404) { throw 'New job ID is not confirmed absent.' }
-                Confirm-Check $Preflight $deadline
+                Confirm-Check $Preflight $deadline $preflightLimit
                 Confirm-Check $Guard $deadline
                 # Must persist possible submission before PUT, not after receiving it.
                 $receipt.submissionPossible = $true

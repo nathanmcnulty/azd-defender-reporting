@@ -39,6 +39,12 @@ Callbacks are trusted procedure code, not serialized data or user script text:
 
 Every callback must honor its remaining budget. Defaults use a monotonic
 stopwatch, an absolute execution deadline and a separate stop/readback deadline.
+The optional `PreflightTimeoutSeconds` policy gives both complete read-only
+preflight passes their own callback limit (up to 300 seconds), each capped by the
+remaining execution time. Guard and Request remain capped at 30 seconds. The core
+default of zero preserves the legacy request-sized preflight budget and binding;
+the live planning entry point explicitly selects 120 seconds. A check returning
+after the overall deadline cannot permit submission.
 Request budgets round up to whole seconds (at most one second of granularity).
 Poll counts remain bounded even if a faulty test clock stalls. Clock/sleep
 overrides are deterministic offline test seams. A future live adapter must prove
@@ -60,6 +66,8 @@ prevents PUT. Updates contain fixed event codes and validated statuses, never ra
 provider errors or tokens.
 
 The schema-v2 binding includes all timeout/poll/read-error policy values. The
+separate preflight policy is included only when explicitly enabled; reconciliation
+must use the same value, including legacy zero when that field was absent. The
 original UTC execution deadline is preserved across process recovery, and each
 invocation uses a monotonic clock for its remaining portion. Resuming cannot
 grant another execution window or change the approved policy. Cancellation gets
