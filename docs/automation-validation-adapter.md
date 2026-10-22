@@ -39,6 +39,20 @@ reviewed parameters with `-Execute` only after approval. ReconcileOnly suppresse
 submission but may stop that same job, so its execution also requires approval.
 The preserved lifecycle receipt binds all timeout/poll/read-error policy values.
 
+`PreflightTimeoutSeconds` defaults to 120 (maximum 300), independently of the
+1–30 second `RequestTimeoutSeconds`. The larger budget covers the complete
+read-only preflight child, including startup, authentication and all artifact
+checks. Artifact and runtime HTTP reads remain capped by the request limit and
+the remaining preflight budget. The maintained target guard's subscription read
+retains its own 30-second HTTP limit; the enclosing child still bounds the whole
+callback. Guard and job-request children retain the request limit.
+Both preflight passes still count against the original execution deadline;
+increasing their allowance does not extend that deadline or reserve runtime for
+the job. Measure the complete sequence before approving execution bounds.
+Use `-PreflightTimeoutSeconds 0` only when reconciling a legacy receipt whose
+policy omitted a separate preflight allowance. Never change a saved policy to
+retry a failed or expired intent.
+
 ## Boundaries enforced by the adapter
 
 Each callback runs in a fresh noninteractive PowerShell child without profiles or

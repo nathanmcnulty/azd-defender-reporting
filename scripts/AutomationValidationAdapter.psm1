@@ -11,7 +11,7 @@ function Invoke-BoundedValidationChild {
     param(
         [Parameter(Mandatory)][string]$ScriptPath,
         [Parameter(Mandatory)][Collections.IDictionary]$Message,
-        [Parameter(Mandatory)][ValidateRange(1,30)][int]$TimeoutSeconds
+        [Parameter(Mandatory)][ValidateRange(1,300)][int]$TimeoutSeconds
     )
     $ErrorActionPreference='Stop'
     $file=Get-Item -LiteralPath $ScriptPath
@@ -44,7 +44,10 @@ function New-AutomationValidationAdapter {
     [CmdletBinding()]
     [OutputType([hashtable])]
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSUseShouldProcessForStateChangingFunctions','',Justification='Only constructs in-memory callbacks; does not access Azure or change state.')]
-    param([Parameter(Mandatory)][Collections.IDictionary]$Context)
+    param(
+        [Parameter(Mandatory)][Collections.IDictionary]$Context,
+        [ValidateRange(1,30)][int]$RequestTimeoutSeconds=20
+    )
     Assert-ValidationContext $Context | Out-Null
     # Snapshot the context so later caller mutation cannot retarget the worker.
     $frozen=$Context | ConvertTo-Json -Depth 32 -Compress | ConvertFrom-Json -AsHashtable -Depth 32
@@ -54,7 +57,7 @@ function New-AutomationValidationAdapter {
     $assertContext=${function:Assert-ValidationContext}
     return @{
         Guard={param($seconds) & $invokeChild -ScriptPath $worker -Message @{action='Guard';context=$frozen;budget=$seconds} -TimeoutSeconds $seconds}.GetNewClosure()
-        Preflight={param($seconds) & $invokeChild -ScriptPath $worker -Message @{action='Preflight';context=$frozen;budget=$seconds} -TimeoutSeconds $seconds}.GetNewClosure()
+        Preflight={param($seconds) & $invokeChild -ScriptPath $worker -Message @{action='Preflight';context=$frozen;budget=$seconds;requestBudget=$RequestTimeoutSeconds} -TimeoutSeconds $seconds}.GetNewClosure()
         Request={param($method,$uri,$body,$seconds)
             # Validate locally before any worker authentication/provider access.
             & $assertContext $frozen | Out-Null

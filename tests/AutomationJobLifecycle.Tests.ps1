@@ -52,7 +52,7 @@ BeforeAll {
 Describe 'Exact-job single-submit lifecycle' {
     BeforeEach {
         $script:receipt=Join-Path $TestDrive ([guid]::NewGuid().ToString('N')+'.json')
-        $script:sim=@{Time=0.0;Calls=[Collections.Generic.List[object]]::new();Created=$false;Stopping=$false;Payload=$null;Reads=0;ReadFailures=0;Status='Completed';InitialStatus=404;SubmitThrows=$false;StopThrows=$false;StopNeverTerminal=$false;MissingAfterSubmit=$false;WrongId=$false;WrongRunbook=$false;UnsafeParameters=$false;Guards=0;GuardFailureAt=[int]::MaxValue;GuardReturnsFalse=$false;Preflights=0;PreflightFails=$false;PreflightFailureAt=[int]::MaxValue;LockReceiptOnSubmit=$false;LockedReceipt=$null}
+        $script:sim=@{Time=0.0;Calls=[Collections.Generic.List[object]]::new();Created=$false;Stopping=$false;Payload=$null;Reads=0;ReadFailures=0;Status='Completed';InitialStatus=404;SubmitThrows=$false;StopThrows=$false;StopNeverTerminal=$false;MissingAfterSubmit=$false;WrongId=$false;WrongRunbook=$false;UnsafeParameters=$false;Guards=0;GuardFailureAt=[int]::MaxValue;GuardReturnsFalse=$false;Preflights=0;PreflightFails=$false;PreflightFailureAt=[int]::MaxValue;GuardBudgets=[Collections.Generic.List[int]]::new();PreflightBudgets=[Collections.Generic.List[int]]::new();LockReceiptOnSubmit=$false;LockedReceipt=$null}
         $script:arguments=New-LifecycleArguments
     }
     AfterEach { if($null -ne $script:sim.LockedReceipt){$script:sim.LockedReceipt.Dispose()} }
@@ -131,6 +131,62 @@ Describe 'Exact-job single-submit lifecycle' {
         $result.submissionAttempted | Should -BeFalse
         @($script:sim.Calls | Where-Object method -eq 'PUT').Count | Should -Be 0
     }
+    It 'allows a longer preflight callback while guard and request budgets remain capped' {
+        $script:arguments.TimeoutSeconds=600
+        $script:arguments.PreflightTimeoutSeconds=120
+        $sim=$script:sim
+        $script:arguments.Guard={param($budget) $sim.GuardBudgets.Add($budget);return $true}.GetNewClosure()
+        $script:arguments.Preflight={param($budget) $sim.PreflightBudgets.Add($budget);return $true}.GetNewClosure()
+        $result=Invoke-ValidationJobLifecycle @script:arguments
+        $result.outcome | Should -Be 'execution-completed'
+        $sim.PreflightBudgets.Count | Should -Be 2
+        @($sim.PreflightBudgets | Where-Object {$_ -lt 1 -or $_ -gt 120}).Count | Should -Be 0
+        @($sim.PreflightBudgets | Where-Object {$_ -gt 30}).Count | Should -Be 2
+        $sim.PreflightBudgets[0] | Should -Be 120
+        $sim.PreflightBudgets[1] | Should -Be 120
+        @($sim.GuardBudgets | Where-Object {$_ -gt 30}).Count | Should -Be 0
+        @($sim.Calls | Where-Object {$_.budget -gt 20}).Count | Should -Be 0
+        $saved=Get-Content -LiteralPath $script:receipt -Raw | ConvertFrom-Json -AsHashtable
+        $saved.binding.policy.preflightTimeoutSeconds | Should -Be 120
+    }
+    It 'caps each preflight callback by the remaining persisted execution time' {
+        $script:arguments.TimeoutSeconds=10
+        $script:arguments.PreflightTimeoutSeconds=120
+        $sim=$script:sim
+        $script:arguments.Guard={param($budget) $sim.GuardBudgets.Add($budget);if($sim.GuardBudgets.Count -eq 1){$sim.Time+=2};return $true}.GetNewClosure()
+        $script:arguments.Preflight={param($budget) $sim.PreflightBudgets.Add($budget);$sim.Time+=1;return $true}.GetNewClosure()
+        $result=Invoke-ValidationJobLifecycle @script:arguments
+        $result.outcome | Should -Be 'execution-completed'
+        ($sim.PreflightBudgets -join ',') | Should -BeExactly '8,7'
+        @($sim.Calls | Where-Object {$_.budget -gt 20}).Count | Should -Be 0
+        @($sim.GuardBudgets | Where-Object {$_ -gt 20}).Count | Should -Be 0
+    }
+    It 'never reaches a job request when preflight returns after the execution deadline' {
+        $script:arguments.TimeoutSeconds=4
+        $script:arguments.PreflightTimeoutSeconds=120
+        $sim=$script:sim
+        $script:arguments.Guard={param($budget) $true}.GetNewClosure()
+        $script:arguments.Preflight={param($budget) $sim.PreflightBudgets.Add($budget);$sim.Time+=5;return $true}.GetNewClosure()
+        $result=Invoke-ValidationJobLifecycle @script:arguments
+        $result.outcome | Should -Be 'execution-timeout'
+        $result.submissionAttempted | Should -BeFalse
+        @($sim.Calls | Where-Object {$_.method -in @('GET','PUT','POST')}).Count | Should -Be 0
+        $sim.PreflightBudgets[0] | Should -Be 4
+    }
+    It 'preserves legacy zero preflight policy bindings for reconciliation' {
+        $script:arguments.PreflightTimeoutSeconds=0
+        $first=Invoke-ValidationJobLifecycle @script:arguments
+        $saved=Get-Content -LiteralPath $script:receipt -Raw | ConvertFrom-Json -AsHashtable
+        $saved.binding.policy.Contains('preflightTimeoutSeconds') | Should -BeFalse
+        $legacyHash=$saved.bindingSha256
+        $putCount=@($script:sim.Calls | Where-Object method -eq 'PUT').Count
+        $script:sim.Reads=0
+        $result=Invoke-ValidationJobLifecycle @script:arguments -ReconcileOnly
+        @($script:sim.Calls | Where-Object method -eq 'PUT').Count | Should -Be $putCount
+        $after=Get-Content -LiteralPath $script:receipt -Raw | ConvertFrom-Json -AsHashtable
+        $after.bindingSha256 | Should -BeExactly $legacyHash
+        @($script:sim.Calls | Where-Object method -eq 'PUT').Count | Should -Be 1
+    }
     It 'rechecks identity immediately before PUT' {
         $script:sim.GuardFailureAt=2
         $result=Invoke-ValidationJobLifecycle @script:arguments
@@ -208,6 +264,14 @@ Describe 'Exact-job single-submit lifecycle' {
         $first=Invoke-ValidationJobLifecycle @script:arguments
         $count=$script:sim.Calls.Count
         $script:arguments.TimeoutSeconds=60
+        { Invoke-ValidationJobLifecycle @script:arguments -ReconcileOnly } | Should -Throw '*match*'
+        $script:sim.Calls.Count | Should -Be $count
+    }
+    It 'rejects a changed preflight timeout policy during reconciliation before requests' {
+        $script:arguments.PreflightTimeoutSeconds=120
+        $first=Invoke-ValidationJobLifecycle @script:arguments
+        $count=$script:sim.Calls.Count
+        $script:arguments.PreflightTimeoutSeconds=121
         { Invoke-ValidationJobLifecycle @script:arguments -ReconcileOnly } | Should -Throw '*match*'
         $script:sim.Calls.Count | Should -Be $count
     }
