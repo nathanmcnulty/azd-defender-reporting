@@ -1,6 +1,7 @@
 #Requires -Version 7.6
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot 'AutomationRuntimeContract.psm1') -ErrorAction Stop
+Import-Module (Join-Path $PSScriptRoot 'AutomationJobParameters.psm1') -ErrorAction Stop
 
 function Assert-ValidationContext {
     <#.SYNOPSIS
@@ -10,6 +11,10 @@ function Assert-ValidationContext {
     [OutputType([bool])]
     param([Parameter(Mandatory)][Collections.IDictionary]$Context)
     $allowedKeys=@('TenantId','SubscriptionId','JobId','AutomationPrincipalId','ResourceGroupName','AutomationAccountName','RunbookName','StorageAccountName','RunbookSha256','FixtureSha256','RuntimeContractSha256','ExpectedUserName','Artifacts','Templates')
+    if($Context.Contains('ParameterEncoding')){
+        if($Context.ParameterEncoding -isnot [string] -or $Context.ParameterEncoding -cne 'JsonValues'){throw 'Invalid parameter encoding.'}
+        $allowedKeys+='ParameterEncoding'
+    }
     if($Context.Count -ne $allowedKeys.Count -or @($Context.Keys | Where-Object {$_ -cnotin $allowedKeys}).Count){throw 'Unexpected context fields.'}
     foreach ($key in @('TenantId','SubscriptionId','JobId','AutomationPrincipalId')) {
         $parsed=[guid]::Empty
@@ -89,6 +94,23 @@ function Assert-AutomationValidationPreflight {
     $runtimeId="$accountId/runtimeEnvironments/$($runtimeContract.Spec.runtimeEnvironmentName)"
     if($runbook.id -isnot [string] -or $runbook.id -ine $runbookId -or $runbook.properties.state -cne 'Published' -or $runbook.properties.runbookType -cne 'PowerShell' -or
         $runbook.properties.runtimeEnvironment -isnot [string] -or $runbook.properties.runtimeEnvironment -cne $runtimeContract.Spec.runtimeEnvironmentName){throw 'Published runbook metadata mismatch.'}
+    if($Context.Contains('ParameterEncoding')){
+        $types=AutomationJobParameters\Get-ValidationParameterTypes
+        $metadata=$runbook.properties.parameters
+        if($metadata -isnot [Collections.IDictionary]){throw 'Published parameter metadata is missing.'}
+        foreach($key in $types.Keys){
+            $names=@($metadata.Keys|Where-Object {$_ -ieq $key})
+            if($names.Count -ne 1){throw 'Published parameter name mismatch.'}
+            $entry=$metadata[$names[0]]
+            if($entry -isnot [Collections.IDictionary] -or
+                $entry.type -isnot [string] -or $entry.type -cne $types[$key]){throw 'Published parameter type mismatch.'}
+        }
+        foreach($key in $metadata.Keys){
+            $entry=$metadata[$key]
+            if($entry -isnot [Collections.IDictionary] -or $entry.isMandatory -isnot [bool]){throw 'Invalid published parameter metadata.'}
+            if($key -notin @($types.Keys) -and $entry.isMandatory){throw 'Unexpected required published parameter.'}
+        }
+    }
     AutomationRuntimeContract\Assert-AutomationRuntimeReadback -RuntimeId $runtimeId `
         -Runtime (Read-Object "${runtimeId}?api-version=2024-10-23") `
         -Packages (Read-Object "$runtimeId/packages?api-version=2024-10-23") | Out-Null
@@ -143,7 +165,8 @@ function Assert-ValidationJobRequest {
     if($Body -isnot [Collections.IDictionary] -or $Body.Count -ne 1 -or $Body.properties -isnot [Collections.IDictionary] -or $Body.properties.Count -ne 2 -or
         $Body.properties.runbook -isnot [Collections.IDictionary] -or $Body.properties.runbook.Count -ne 1 -or $Body.properties.runbook.name -cne $Context.RunbookName -or
         $Body.properties.parameters -isnot [Collections.IDictionary] -or $Body.properties.parameters.Count -ne 6){throw 'Unsafe job payload shape.'}
-    $expected=@{StorageAccountName=$Context.StorageAccountName;UseExistingExportsOnly='true';IncludeAdvancedHunting='false';UseDirectMergeDeviceLookup='false';DashboardDeliveryMode='SelfContained';Export='BlobStorage'}
+    if(-not $Context.Contains('ParameterEncoding')){throw 'Legacy parameter encoding permits reconciliation only.'}
+    $expected=AutomationJobParameters\Get-ValidationJobParameters -StorageAccountName $Context.StorageAccountName -ParameterEncoding $Context.ParameterEncoding
     foreach($key in $expected.Keys){if($Body.properties.parameters[$key] -isnot [string] -or $Body.properties.parameters[$key] -cne $expected[$key]){throw 'Unsafe job parameter.'}}
     return $true
 }

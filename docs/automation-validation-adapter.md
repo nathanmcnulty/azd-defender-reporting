@@ -16,6 +16,8 @@ Use a private JSON context with exactly these fields:
 - FixtureSha256, the reviewed whole-fixture identity from Test-SyntheticExportFixture.
 - RuntimeContractSha256, the byte digest returned by Get-AutomationRuntimeContract
   for the reviewed contracts/automation-runtime.json in this checkout.
+- ParameterEncoding, exactly `JsonValues` for new job submissions. Historical
+  contexts without this field permit only same-job reconciliation.
 - Artifacts and Templates, arrays of `{name, bytes, sha256}`. The inputs must already
   have passed the offline GZip/NDJSON/count/content gate. Template entries must come
   from the locked release's maintained publisher manifest, including its nested
@@ -38,6 +40,23 @@ identities, execution/stop bounds and permitted HTTP operations. Use the same
 reviewed parameters with `-Execute` only after approval. ReconcileOnly suppresses
 submission but may stop that same job, so its execution also requires approval.
 The preserved lifecycle receipt binds all timeout/poll/read-error policy values.
+
+The shared parameter contract uses strings for StorageAccountName,
+DashboardDeliveryMode and Export, and Booleans for UseExistingExportsOnly,
+IncludeAdvancedHunting and UseDirectMergeDeviceLookup. Following
+[Az.Automation's parameter converter](https://github.com/Azure/azure-powershell/blob/main/src/Automation/Automation/Common/PowershellJsonConverter.cs),
+each logical value is JSON-serialized once into a wire string before the whole
+request is serialized. For example, a logical string becomes `"SelfContained"`
+including its quotes, while a logical Boolean becomes `false`. Job readback must
+match all six exact wire strings. The receipt binds this encoding policy and
+payload; reconciliation never changes encoding or resets the saved deadline.
+
+New-mode preflight requires the published runbook's six named parameter types to
+match this String/Boolean contract. Additional optional production parameters are
+allowed; unknown required parameters and duplicate name aliases are rejected.
+The maintained cancellation fixture is `tests/fixtures/SyntheticCancellationProbe.ps1`;
+its types match the production wrapper and it rejects omitted arguments before
+waiting. Publishing it or starting a new job requires separate exact approval.
 
 `PreflightTimeoutSeconds` defaults to 120 (maximum 300), independently of the
 1–30 second `RequestTimeoutSeconds`. The larger budget covers the complete

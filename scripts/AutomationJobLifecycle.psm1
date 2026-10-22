@@ -1,5 +1,6 @@
 #Requires -Version 7.6
 Set-StrictMode -Version Latest
+Import-Module (Join-Path $PSScriptRoot 'AutomationJobParameters.psm1') -ErrorAction Stop
 
 function Invoke-ValidationJobLifecycle {
     <#
@@ -38,6 +39,7 @@ function Invoke-ValidationJobLifecycle {
         [ValidateRange(1, 30)][int]$RequestTimeoutSeconds = 20,
         # Zero preserves the legacy callback budget and receipt binding.
         [ValidateRange(0, 300)][int]$PreflightTimeoutSeconds = 0,
+        [ValidateSet('LegacyRaw','JsonValues')][string]$ParameterEncoding = 'LegacyRaw',
         [ValidateRange(1, 30)][int]$PollSeconds = 5,
         [ValidateRange(1, 10)][int]$MaxReadErrors = 3,
         [switch]$ReconcileOnly,
@@ -67,10 +69,11 @@ function Invoke-ValidationJobLifecycle {
     $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Automation/automationAccounts/$AutomationAccountName/jobs/$JobId"
     $uri = "https://management.azure.com${resourceId}?api-version=2024-10-23"
     $stopUri = "https://management.azure.com${resourceId}/stop?api-version=2024-10-23"
-    $parameters = [ordered]@{StorageAccountName=$StorageAccountName;UseExistingExportsOnly='true';IncludeAdvancedHunting='false';UseDirectMergeDeviceLookup='false';DashboardDeliveryMode='SelfContained';Export='BlobStorage'}
+    $parameters = AutomationJobParameters\Get-ValidationJobParameters -StorageAccountName $StorageAccountName -ParameterEncoding $ParameterEncoding
     $payload = [ordered]@{properties=[ordered]@{runbook=[ordered]@{name=$RunbookName};parameters=$parameters}}
     $policy = [ordered]@{executionTimeoutSeconds=$TimeoutSeconds;stopTimeoutSeconds=$StopTimeoutSeconds;requestTimeoutSeconds=$RequestTimeoutSeconds;pollSeconds=$PollSeconds;maxReadErrors=$MaxReadErrors}
     if ($PreflightTimeoutSeconds -gt 0) { $policy.preflightTimeoutSeconds = $PreflightTimeoutSeconds }
+    if ($ParameterEncoding -ceq 'JsonValues') { $policy.parameterEncoding = 'JsonValues' }
     $preflightLimit = if ($PreflightTimeoutSeconds -gt 0) { $PreflightTimeoutSeconds } else { $requestLimit }
     $binding = [ordered]@{tenantId=$TenantId.ToString();subscriptionId=$SubscriptionId.ToString();jobResourceId=$resourceId;runbook=$RunbookName;storage=$StorageAccountName;fixtureSha256=$FixtureSha256;runbookSha256=$RunbookSha256;payload=$payload;policy=$policy}
     $bindingText = $binding | ConvertTo-Json -Depth 10 -Compress

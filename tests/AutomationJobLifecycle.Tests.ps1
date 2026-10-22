@@ -56,6 +56,36 @@ Describe 'Exact-job single-submit lifecycle' {
         $script:arguments=New-LifecycleArguments
     }
     AfterEach { if($null -ne $script:sim.LockedReceipt){$script:sim.LockedReceipt.Dispose()} }
+    It 'preserves historical legacy receipt binding bytes with preflight <Seconds>' -ForEach @(
+        @{Seconds=0;Hash='47f4efa474770953f48a1a12dbee317af3a0155251d2fc30682db8a98a883676'},
+        @{Seconds=120;Hash='d71922162c6a5a6cbd80987f38b8bd319f135587193c947dc46c305248fda03a'}
+    ) {
+        $script:arguments.PreflightTimeoutSeconds=$Seconds
+        $null=Invoke-ValidationJobLifecycle @script:arguments
+        $first=Get-Content -LiteralPath $script:receipt -Raw|ConvertFrom-Json -AsHashtable -DateKind String
+        $first.bindingSha256|Should -BeExactly $Hash
+        $first.binding.policy.Contains('parameterEncoding')|Should -BeFalse
+        $deadline=$first.executionDeadlineUtc
+        $null=Invoke-ValidationJobLifecycle @script:arguments -ReconcileOnly
+        $after=Get-Content -LiteralPath $script:receipt -Raw|ConvertFrom-Json -AsHashtable -DateKind String
+        $after.bindingSha256|Should -BeExactly $Hash
+        ([DateTimeOffset]::Parse($after.executionDeadlineUtc).UtcTicks)|Should -Be ([DateTimeOffset]::Parse($deadline).UtcTicks)
+        @($script:sim.Calls|Where-Object method -EQ 'PUT').Count|Should -Be 1
+    }
+    It 'binds JsonValues in payload and policy and rejects an encoding change before callbacks' {
+        $script:arguments.ParameterEncoding='JsonValues'
+        $first=Invoke-ValidationJobLifecycle @script:arguments
+        $first.outcome|Should -BeExactly 'execution-completed'
+        $first=Get-Content -LiteralPath $script:receipt -Raw|ConvertFrom-Json -AsHashtable -DateKind String
+        $first.binding.policy.parameterEncoding|Should -BeExactly 'JsonValues'
+        $first.binding.payload.properties.parameters.StorageAccountName|Should -BeExactly '"syntheticstore"'
+        $count=$script:sim.Calls.Count
+        $guards=$script:sim.Guards
+        $script:arguments.ParameterEncoding='LegacyRaw'
+        {Invoke-ValidationJobLifecycle @script:arguments -ReconcileOnly}|Should -Throw '*approved operation*'
+        $script:sim.Calls.Count|Should -Be $count
+        $script:sim.Guards|Should -Be $guards
+    }
     It 'persists intent before one PUT, fixes safe parameters and confirms execution completion' {
         $result=Invoke-ValidationJobLifecycle @script:arguments
         $result.outcome | Should -Be 'execution-completed'
