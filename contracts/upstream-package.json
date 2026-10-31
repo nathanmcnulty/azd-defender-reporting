@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "28c68b4ea5521f834884a8f7aad9cfb38f1588b8",
+  "sourceCommit": "69e5cfd53e5f1e6c8b762c86cb5b3967b3359e98",
   "archivePath": "vendor/defender-reporting-source.zip",
-  "archiveSha256": "06ADF2D51036D951BCADBDC7E6E9B39BAE806C52423A5810230CD1B422B10B3D",
-  "archiveSizeBytes": 6993508
+  "archiveSha256": "33EAAD7E1FF89E63EAF7187FCC43315E4FBA613F0DC864374891DD1F17F21231",
+  "archiveSizeBytes": 2527554
 }

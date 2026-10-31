@@ -77,7 +77,7 @@ namespace AzdValidationTests {
                             'ParameterWrongType'{$metadata.UseExistingExportsOnly.type='System.String'}
                             'ParameterMandatoryString'{$metadata.Export.isMandatory='false'}
                             'ParameterExtraRequired'{$metadata.Other=@{type='System.String';isMandatory=$true}}
-                            'ParameterExtraOptional'{$metadata.Other=@{type='System.String';isMandatory=$false}}
+                            'ParameterExtraOptional'{$metadata.UseBoundedPublicationMetadataReader=@{type='System.Boolean';isMandatory=$false}}
                             'ParameterMetadataMissing'{$metadata=$null}
                             'ParameterUppercase'{$metadata['STORAGEACCOUNTNAME']=$metadata.StorageAccountName;[void]$metadata.Remove('StorageAccountName');$metadata.STORAGEACCOUNTNAME.isMandatory=$true}
                             'ParameterDuplicate'{$metadata['STORAGEACCOUNTNAME']=$metadata.StorageAccountName}

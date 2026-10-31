@@ -131,11 +131,10 @@ AfterAll {
     Remove-Item Function:/az,Function:/Invoke-RestMethod,Function:/Invoke-WebRequest
     Remove-Variable pub,PublisherRealGetCommand -Scope Global
 }
-    It 'rejects invalid target before writes for <Entry> (<Failure>)' -ForEach @(
-        foreach($entry in @('Publish-FunctionAppPackage','Publish-AutomationRunbook','Publish-TemplateAssets','Publish-HostedSurface','Set-HostedSurfaceAuth','Publish-Deployment','Deploy')) {
+    foreach($entry in @('Publish-FunctionAppPackage','Publish-AutomationRunbook','Publish-TemplateAssets','Publish-HostedSurface','Set-HostedSurfaceAuth','Publish-Deployment','Deploy')) {
+        It "rejects invalid target before writes for $entry (<Failure>)" -ForEach @(
             foreach($failure in @('Missing','MalformedId','WrongSubscription','WrongTenant','Disabled','MissingState','FailedRead','MalformedRead','TokenMismatch','TokenTenantMismatch','ArmSubscriptionMismatch','ArmTenantMismatch')) { @{Entry=$entry;Failure=$failure} }
-        }
-    ) {
+        ) {
         $parameters=@{}+$target
         switch($Failure){
             Missing {$parameters=@{SubscriptionId='';TenantId=''}}
@@ -163,6 +162,7 @@ AfterAll {
         { & (Join-Path $root "scripts/$Entry.ps1") @parameters | Out-Null } | Should -Throw $(if($Failure -in @('Missing','MalformedId')){'*explicit*'}else{'*Enabled*'})
         $global:pub.Writes.Count | Should -Be 0
         @($global:pub.Cli | Where-Object {$_ -match '^(login|account set)' }).Count | Should -Be 0
+        }
     }
     It 'publishes Function with explicit target regardless of unrelated global default' {
         & "$root/scripts/Publish-FunctionAppPackage.ps1" @target -ResourceGroupName rg -FunctionAppName fn -SkipTemplatePublish | Out-Null
@@ -259,20 +259,20 @@ AfterAll {
         @($global:pub.Writes | Where-Object {$_ -match '/runbooks/Invoke-DashboardPipeline/publish\?'}).Count | Should -Be 1
         @($global:pub.Requests | Where-Object {$_.Method -eq 'GET' -and $_.Uri -match '/(schedules|jobSchedules)\?'}).Count | Should -BeGreaterOrEqual 2
     }
-    It 'rejects unsafe manual-only scheduling state before any write through <Entry> (<State>)' -ForEach @(
-        foreach($entry in @('Publish-AutomationRunbook','Publish-Deployment')){
+    foreach($entry in @('Publish-AutomationRunbook','Publish-Deployment')){
+        It "rejects unsafe manual-only scheduling state before any write through $entry (<State>)" -ForEach @(
             foreach($state in @('ExistingSchedule','ExistingLink','Malformed','NullValue','ScalarValue','Paged','FailedRead',
                 'PartialResponse','ArrayRoot','ArrayNextLink','NumericNextLink','WhitespaceNextLink','NullRoot','InvalidJson','HttpFailure')){
                 @{Entry=$entry;State=$state}
             }
-        }
-    ) {
+        ) {
         $env:COMPUTE_KIND='automation'
         $global:pub.ScheduleState=$State
         $global:pub.ScheduleReadFailure=($State -eq 'FailedRead')
         $expectedError=if($State -eq 'FailedRead'){'*Fixture schedule read failure*'}else{'*ManualOnly*'}
         {& "$root/scripts/$Entry.ps1" @target -ResourceGroupName rg -AutomationAccountName aa -StorageAccountName reportstore -ManualOnly | Out-Null} | Should -Throw $expectedError
         $global:pub.Writes.Count | Should -Be 0
+        }
     }
     It 'accepts a complete empty manual-only inventory with <State>' -ForEach @(
         @{State='NullNextLink'},@{State='EmptyNextLink'}

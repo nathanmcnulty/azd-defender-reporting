@@ -250,7 +250,7 @@ if ($parseErrors.Count -gt 0) {
     throw "Generated runbook failed PowerShell parsing: $($parseErrors[0].Message)"
 }
 
-$requiredParameters = @('StorageAccountName', 'DashboardDeliveryMode', 'IncludeAdvancedHunting', 'UseExistingExportsOnly', 'UseDirectMergeDeviceLookup', 'Export')
+$requiredParameters = @('StorageAccountName', 'DashboardDeliveryMode', 'IncludeAdvancedHunting', 'UseExistingExportsOnly', 'UseDirectMergeDeviceLookup', 'UseBoundedPublicationMetadataReader', 'Export')
 $actualParameters = @($runbookAst.ParamBlock.Parameters | ForEach-Object { $_.Name.VariablePath.UserPath })
 if (@(Compare-Object -ReferenceObject $requiredParameters -DifferenceObject $actualParameters).Count -gt 0) {
     throw "Generated runbook parameter contract mismatch. Expected: $($requiredParameters -join ', '). Actual: $($actualParameters -join ', ')."

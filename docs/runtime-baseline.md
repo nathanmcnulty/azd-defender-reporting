@@ -4,7 +4,8 @@ Owned scripts and tests require PowerShell 7.6 or later. Repository tests use
 Pester 6.2.0. The three workflows that run repository PowerShell select the official SHA-256-verified portable
 PowerShell 7.6.6 Windows x64 runtime and log its actual version before repository
 work. The runner's preinstalled shell only bootstraps that selection; it is not
-a supported runtime for the wrapper. Upstream archives remain frozen evidence.
+a supported runtime for the wrapper. Upstream source and package archives are
+immutable for each reviewed lock and are refreshed together.
 
 The wrapper uses PowerShell 7.6 / .NET 10 LTS for the Flex
 Consumption Function App and creates `PowerShell-76-AzAccounts` for the
