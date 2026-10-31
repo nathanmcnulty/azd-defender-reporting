@@ -1,6 +1,6 @@
 # Upstream integration
 
-This wrapper includes a reviewed source archive for the locked `defender-reporting` release. The supported default publish path verifies and extracts that archive locally before building; a fresh checkout does not need the upstream source service at deployment time.
+This wrapper includes a reviewed source archive for the locked `defender-reporting` revision. The supported default publish path verifies and extracts that archive locally before building; a fresh checkout does not need the upstream source service at deployment time.
 
 ## Resolution order
 
@@ -17,8 +17,12 @@ The bundle lock in `contracts\upstream-package.json` binds the archive's exact S
 If not set, the wrapper defaults to:
 
 - `DEFENDER_REPORTING_REPO=https://github.com/nathanmcnulty/defender-reporting.git`
-- `DEFENDER_REPORTING_REF=v2026.07.13`
-- expected commit `28c68b4ea5521f834884a8f7aad9cfb38f1588b8`
+- `DEFENDER_REPORTING_REF=69e5cfd53e5f1e6c8b762c86cb5b3967b3359e98`
+- expected commit `69e5cfd53e5f1e6c8b762c86cb5b3967b3359e98`
+
+This immutable commit includes the maintained PowerShell 7.6 baseline and the
+merged hosted-runtime changes. The source archive and prebuilt Function package
+are refreshed together; the default does not follow a moving branch.
 
 The resolver verifies the full commit when the default repository and ref are used. Explicit repository/ref overrides and local paths are supported for development, but are reported as not matching the compatibility lock when they resolve elsewhere.
 
@@ -34,9 +38,17 @@ The resolver verifies the full commit when the default repository and ref are us
 `.github\workflows\update-upstream.yml` runs weekly and on demand. It resolves the latest upstream release, runs the complete wrapper compatibility suite against that checkout, archives the validated commit and Function App build, updates the locks and package files, and opens a pull request. The same process can be run locally:
 
 ```powershell
-.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release>       # test only
-.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release> -UpdateLock
+.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release-or-full-sha>       # test only
+.\scripts\Update-UpstreamLock.ps1 -CandidateRef <release-or-full-sha> -UpdateLock
 ```
+
+At this refresh, the latest published upstream release is still `v2026.07.13`,
+older than the reviewed commit pin. The scheduled release check continues to
+select that release; its old runbook parameter contract is rejected by validation,
+so it does not replace the new lock. Use an explicit reviewed full-SHA
+`-CandidateRef` for maintenance until a compatible release is published. This
+refresh does not change the updater to follow a moving branch or claim that the
+scheduled latest-release check now passes.
 
 ## Function App package contract
 
@@ -65,9 +77,14 @@ The wrapper also expects the upstream repo to provide:
 - a template publish surface, preferably `build\Publish-DashboardTemplates.ps1`
 - `build\Publish-DashboardTemplates.ps1` with `-MetadataPath`
 
-`Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, verifies its exact parameter set and shared-helper fingerprint, writes a wrapper-owned manifest under `.local\artifacts\automation-runbook`, uploads template assets, and publishes the generated runbook into the provisioned Automation Account runtime environment.
+`Publish-AutomationRunbook.ps1` resolves the upstream repo, invokes the upstream runbook build, verifies its exact parameter set and shared-helper fingerprint, writes a wrapper-owned manifest under `.local\artifacts\automation-runbook`, uploads template assets, and publishes the generated runbook into the provisioned Automation Account runtime environment. The current seven-parameter source includes optional Boolean `UseBoundedPublicationMetadataReader`, which defaults to false. Synthetic job requests retain their existing six explicit values and do not enable this option.
 
 `Publish-TemplateAssets.ps1` requires the documented build-layer publisher and validates its metadata schema, safe paths, file hashes, file count, and aggregate size before accepting publication.
+
+The wrapper loads `build/private/DashboardTemplatePublishTools.ps1` from the
+locked source for offline template-state calculations. Authentication and uploads
+continue through the wrapper's target-bound path; upstream publishing functions
+are not invoked.
 
 `Publish-HostedSurface.ps1` reuses the same template-publish contract, configures the hosted Container App Easy Auth path by default unless the operator explicitly opts out, and then validates that the provisioned Container App host is reachable for hosted dashboard delivery.
 

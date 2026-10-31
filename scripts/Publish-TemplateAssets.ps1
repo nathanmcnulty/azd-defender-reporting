@@ -142,9 +142,9 @@ if ($supportsMetadataPath) {
     $uploadParameters.MetadataPath = $resolvedMetadataPath
 }
 
-# Reuse locked upstream's offline template state contract, never its ambient
-# authentication/publishing functions. The archive and its version remain unchanged.
-. (Join-Path $upstreamRepo.ResolvedPath 'build/private/AzureArtifactBuildTools.ps1')
+# Reuse locked upstream's offline template-state functions; authentication and
+# publication remain wrapper-owned and target-bound.
+. (Join-Path $upstreamRepo.ResolvedPath 'build/private/DashboardTemplatePublishTools.ps1')
 $resolvedTemplatesPath = Resolve-DashboardTemplatesPath -RepoRoot $upstreamRepo.ResolvedPath -TemplatesPath $TemplatesPath
 $publishState = Get-DashboardTemplatePublishState -TemplatesPath $resolvedTemplatesPath -RepoRoot $upstreamRepo.ResolvedPath
 $publisherMetadata = [pscustomobject]@{
