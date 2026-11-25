@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 
 $runtimeEnvironmentApiVersion = '2024-10-23'
 $automationAccountApiVersion = '2023-11-01'
-$runtimeEnvironmentName = 'PowerShell-74-AzAccounts'
+$runtimeEnvironmentName = 'PowerShell-76-AzAccounts'
 $runbookName = 'Invoke-DashboardPipeline'
 $dailyScheduleName = 'DashboardPipeline-Daily'
 $legacyWeeklyScheduleName = 'DashboardPipeline-Every7Days'
@@ -355,10 +355,10 @@ $runtimeEnvironmentPayload = @{
     properties = @{
         runtime = @{
             language = 'PowerShell'
-            version = '7.4'
+            version = '7.6'
         }
         defaultPackages = @{}
-        description = 'PowerShell 7.4 with Az.Accounts only (no full Az module or Az CLI)'
+        description = 'PowerShell 7.6 with Az.Accounts only (no full Az module or Az CLI)'
     }
 } | ConvertTo-Json -Depth 6
 

@@ -55,9 +55,9 @@ param functionRuntime string = 'powershell'
 
 @description('Functions runtime version for the Flex Consumption Function App.')
 @allowed([
-  '7.4'
+  '7.6'
 ])
-param functionRuntimeVersion string = '7.4'
+param functionRuntimeVersion string = '7.6'
 
 @description('Maximum scale-out instance count for the Function App.')
 @minValue(40)
