@@ -36,7 +36,7 @@ Describe 'Wrapper hosted PowerShell LTS runtime' {
         $result = @(& $publisherPath -BuildOnly) | Where-Object { $_.RuntimeEnvironmentName }
         $result.Count | Should -Be 1
         $result.RuntimeEnvironmentName | Should -Be 'PowerShell-76-AzAccounts'
-        $result.UpstreamCommit | Should -Be '28c68b4ea5521f834884a8f7aad9cfb38f1588b8'
+        $result.UpstreamCommit | Should -Be 'c4a16ef371be5813825bfd228ebc774200ccd02e'
         Test-Path $result.RunbookScriptPath | Should -BeTrue
     }
 }

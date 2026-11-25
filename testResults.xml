@@ -1,0 +1,32 @@
+﻿<?xml version="1.0" encoding="utf-8" standalone="no"?>
+<test-results xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:noNamespaceSchemaLocation="nunit_schema_2.5.xsd" name="Pester" total="7" errors="0" failures="0" not-run="0" inconclusive="0" ignored="0" skipped="0" invalid="0" date="2026-11-25" time="00:04:49">
+  <environment nunit-version="2.5.8.0" cwd="C:\Users\NathanMcNulty\AppData\Local\Temp\azd-wrap" machine-name="DESKTOP-ELP1TOI" os-version="10.0.29708" clr-version="10.0.15" user="NathanMcNulty" user-domain="AzureAD" platform="Microsoft Windows 11 Enterprise Insider Preview|C:\WINDOWS|\Device\Harddisk0\Partition3" />
+  <culture-info current-culture="en-US" current-uiculture="en-US" />
+  <test-suite type="TestFixture" name="Pester" executed="True" result="Success" success="True" time="15.5767" asserts="0" description="Pester">
+    <results>
+      <test-suite type="TestFixture" name="C:\Users\NathanMcNulty\AppData\Local\Temp\azd-wrap\tests\BundledUpstream.Tests.ps1" executed="True" result="Success" success="True" time="11.0832" asserts="0" description="C:\Users\NathanMcNulty\AppData\Local\Temp\azd-wrap\tests\BundledUpstream.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Bundled upstream release" executed="True" result="Success" success="True" time="6.5304" asserts="0" description="Bundled upstream release">
+            <results>
+              <test-case description="resolves exact build source without invoking Git or a network fetch" name="Bundled upstream release.resolves exact build source without invoking Git or a network fetch" time="2.4398" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="uses the exact released Function App package without rebuilding on the publishing host" name="Bundled upstream release.uses the exact released Function App package without rebuilding on the publishing host" time="1.8664" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects changed released package bytes before publication" name="Bundled upstream release.rejects changed released package bytes before publication" time="1.7426" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="rejects changed archive bytes before extracting source" name="Bundled upstream release.rejects changed archive bytes before extracting source" time="0.2091" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+      <test-suite type="TestFixture" name="C:\Users\NathanMcNulty\AppData\Local\Temp\azd-wrap\tests\RuntimeLts.Tests.ps1" executed="True" result="Success" success="True" time="4.4934" asserts="0" description="C:\Users\NathanMcNulty\AppData\Local\Temp\azd-wrap\tests\RuntimeLts.Tests.ps1">
+        <results>
+          <test-suite type="TestFixture" name="Wrapper hosted PowerShell LTS runtime" executed="True" result="Success" success="True" time="3.7713" asserts="0" description="Wrapper hosted PowerShell LTS runtime">
+            <results>
+              <test-case description="selects PowerShell 7.6 for the existing Flex worker" name="Wrapper hosted PowerShell LTS runtime.selects PowerShell 7.6 for the existing Flex worker" time="0.0102" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="creates a distinct 7.6 Automation environment and explicitly binds the runbook" name="Wrapper hosted PowerShell LTS runtime.creates a distinct 7.6 Automation environment and explicitly binds the runbook" time="0.2094" asserts="0" success="True" result="Success" executed="True" />
+              <test-case description="builds the hash-locked upstream runbook without cloud operations and reports the new binding" name="Wrapper hosted PowerShell LTS runtime.builds the hash-locked upstream runbook without cloud operations and reports the new binding" time="3.5136" asserts="0" success="True" result="Success" executed="True" />
+            </results>
+          </test-suite>
+        </results>
+      </test-suite>
+    </results>
+  </test-suite>
+</test-results>

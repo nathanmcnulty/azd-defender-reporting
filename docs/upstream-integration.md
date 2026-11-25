@@ -17,8 +17,8 @@ The bundle lock in `contracts\upstream-package.json` binds the archive's exact S
 If not set, the wrapper defaults to:
 
 - `DEFENDER_REPORTING_REPO=https://github.com/nathanmcnulty/defender-reporting.git`
-- `DEFENDER_REPORTING_REF=v2026.07.13`
-- expected commit `28c68b4ea5521f834884a8f7aad9cfb38f1588b8`
+- `DEFENDER_REPORTING_REF=v2026.11.25`
+- expected commit `c4a16ef371be5813825bfd228ebc774200ccd02e`
 
 The resolver verifies the full commit when the default repository and ref are used. Explicit repository/ref overrides and local paths are supported for development, but are reported as not matching the compatibility lock when they resolve elsewhere.
 

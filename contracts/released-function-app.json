@@ -1,14 +1,22 @@
 {
   "schemaVersion": 1,
-  "sourceCommit": "28c68b4ea5521f834884a8f7aad9cfb38f1588b8",
+  "sourceCommit": "c4a16ef371be5813825bfd228ebc774200ccd02e",
   "packagePath": "vendor/function-app-package.zip",
-  "packageSha256": "C4FAB102F70CD0FEFE9919D41A049D05A2BE13F371BBC0A12765D2598BE34887",
-  "packageSizeBytes": 20500836,
-  "functionAppEntryPointFingerprint": "f8e4e57d616dac2f2f3442b9c294ae415f8dc7e7447181b46f2f23c61fb7d745",
-  "sharedHelpersFingerprint": "f8e4e57d616dac2f2f3442b9c294ae415f8dc7e7447181b46f2f23c61fb7d745",
+  "packageSha256": "1DE14B6582B5DACD7B0FB58335404A420BECCD84E14EFCBDFA5C7D4912E0B44C",
+  "packageSizeBytes": 20514829,
+  "functionAppEntryPointFingerprint": "155e9dd37484b2d2509df9b9536b566e14de632799e7531637af3a96f04f3fc8",
+  "sharedHelpersFingerprint": "155e9dd37484b2d2509df9b9536b566e14de632799e7531637af3a96f04f3fc8",
   "stagedAzAccountsModule": {
     "version": "5.5.0",
-    "bundledVersions": ["5.5.0", "5.3.4"],
-    "fileCount": 152
+    "bundledVersions": [
+      "5.5.0",
+      "5.3.4"
+    ],
+    "fileCount": 152,
+    "manifestPath": "azure/function-app/Modules/Az.Accounts/5.5.0/Az.Accounts.psd1",
+    "manifestPaths": [
+      "azure/function-app/Modules/Az.Accounts/5.5.0/Az.Accounts.psd1",
+      "azure/function-app/Modules/Az.Accounts/5.3.4/Az.Accounts.psd1"
+    ]
   }
 }
