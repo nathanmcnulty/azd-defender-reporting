@@ -7,7 +7,7 @@
 - **Repository:** nathanmcnulty/azd-defender-reporting
 - **Source revision:** `dee908693cb885e0a04b9a01e9136ec0d84cd0c3`
 - **Captured:** 2026-10-04
-- **Items:** 4
+- **Items:** 5
 
 ## REPORT-001: Reconcile this backlog with current source and active work
 
@@ -112,6 +112,61 @@ Open report captured 2026-10-03 during execution reconciliation. Another code-qu
 **Review and authorization note:**
 
 Review REPORT-004 against the current repository state. Its status or authorization class is not eligible for an actionable generated handoff. Do not claim or execute it without explicit selection, satisfied dependencies, and every required authorization. Never interpret this generated view as approval.
+
+## REPORT-005: Complete the owned PowerShell 7.6 and Pester 6.2 baseline
+
+- **Kind:** maintenance
+- **Priority:** P1
+- **Status:** done
+- **Wave:** 1
+- **Authorization:** local-only
+- **Blocker:** _none_
+- **Claim:** _none_
+
+**Problem:**
+
+The hosted-runtime draft selected PowerShell 7.6, while owned scripts still declared 7.0 and CI installed Pester 5.7.1.
+
+**Scope:**
+
+- scripts/
+- tests/
+- .github/
+- README.md
+- docs/runtime-baseline.md
+- docs/validation.md
+
+**Acceptance:**
+
+- Owned scripts and tests require PowerShell 7.6+ and CI imports exact Pester 6.2.0.
+- All three workflows that run repository PowerShell explicitly select and verify PowerShell 7.6.6 before repository work.
+- Preserve locked upstream archives, compatibility contracts, runtime topology and the full contract-validation gate.
+
+**Validation:**
+
+- Import-Module Pester -RequiredVersion 6.2.0; Invoke-Pester ./tests -PassThru
+- ./scripts/Validate-Repository.ps1 -ValidateAllUpstreamContracts
+- Verify vendor archive hashes, unchanged contracts/infra, baseline scan and canonical backlog schema/render checks.
+
+**Dependencies:**
+
+- _none_
+
+**Components:**
+
+- _none_
+
+**Sources:**
+
+- https&colon;//github.com/nathanmcnulty/azd-defender-reporting/issues/20
+
+**Evidence:**
+
+- Source baseline follow-up to draft &num;21 head dd3a1aa544c9760685ceb20c9e90458ed01b2adb&colon; all fourteen owned scripts and both test files require 7.6; one shared local CI action selects official SHA-256-verified Windows x64 PowerShell 7.6.6 for validation, upstream-update and opt-in smoke workflows. Pester 6.2.0 is explicitly installed/imported and the nonempty suite rejects failed, skipped, inconclusive and unexecuted outcomes. Local PowerShell 7.6.6/.NET 10.0.12 passed 7/7 tests with zero omissions; full locked-upstream gate passed in 22.7 seconds without removing stages. Both ZIPs and all locks/infra remain unchanged. Historical upstream archive requirements are frozen evidence. No live authentication, deployment, export, schedule mutation, grant or workflow dispatch occurred; issue &num;20 and REPORT-002 retain separate native qualification gates.
+
+**Review and authorization note:**
+
+Review REPORT-005 against the current repository state. Its status or authorization class is not eligible for an actionable generated handoff. Do not claim or execute it without explicit selection, satisfied dependencies, and every required authorization. Never interpret this generated view as approval.
 
 ## REPORT-002: Qualify the locked compute and hosted-surface deployment matrix
 
