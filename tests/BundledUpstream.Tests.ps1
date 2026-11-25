@@ -36,7 +36,7 @@ Describe 'Bundled upstream release' {
             $source = & $script:resolver
             $source.Source | Should -Be 'bundled-release'
             $source.MatchesCompatibilityLock | Should -BeTrue
-            $source.Commit | Should -Be '28c68b4ea5521f834884a8f7aad9cfb38f1588b8'
+            $source.Commit | Should -Be 'c4a16ef371be5813825bfd228ebc774200ccd02e'
             Test-Path -LiteralPath (Join-Path $source.ResolvedPath 'build/Build-FunctionAppPackage.ps1') | Should -BeTrue
             Test-Path -LiteralPath (Join-Path $source.ResolvedPath 'build/azure/Build-Runbook.ps1') | Should -BeTrue
             (& $script:resolver -RepositoryPath $source.ResolvedPath).Source | Should -Be 'bundled-release'
@@ -47,9 +47,9 @@ Describe 'Bundled upstream release' {
         & {
             function git { throw 'Git must not be used for the supported release package.' }
             $result = & $script:publisher -BuildOnly
-            $result.PackageSha256 | Should -Be 'C4FAB102F70CD0FEFE9919D41A049D05A2BE13F371BBC0A12765D2598BE34887'
+            $result.PackageSha256 | Should -Be '1DE14B6582B5DACD7B0FB58335404A420BECCD84E14EFCBDFA5C7D4912E0B44C'
             $result.PackagePath | Should -Be $script:functionPackage
-            $result.UpstreamCommit | Should -Be '28c68b4ea5521f834884a8f7aad9cfb38f1588b8'
+            $result.UpstreamCommit | Should -Be 'c4a16ef371be5813825bfd228ebc774200ccd02e'
         }
     }
 

@@ -82,6 +82,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
       AzureWebJobsStorage__accountName: storageAccountName
       AzureWebJobsStorage__credential: 'managedidentity'
       AzureWebJobsStorage__clientId: userAssignedIdentity.properties.clientId
+      AZURE_CLIENT_ID: userAssignedIdentity.properties.clientId
       FUNCTIONS_EXTENSION_VERSION: '~4'
       STORAGE_ACCOUNT_NAME: storageAccountName
       DASHBOARD_DELIVERY_MODE: dashboardDeliveryMode
